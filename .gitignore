@@ -200,3 +200,6 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# LLM
+*/.gigacode/

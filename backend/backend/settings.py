@@ -15,11 +15,11 @@ from pathlib import Path
 
 from environ import environ
 
-env = environ.Env()
-environ.Env.read_env(env_file="../../.env")
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+env = environ.Env()
+environ.Env.read_env(env_file=BASE_DIR.parent / ".env")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
@@ -48,7 +48,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
 
-    "src.auth.apps",
+    "src.user.apps.UserConfig",
 ]
 
 MIDDLEWARE = [
@@ -95,7 +95,7 @@ DATABASES = {
         "PORT": env("DB_PORT"),
     }
 }
-
+AUTH_USER_MODEL = "user.User"
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators

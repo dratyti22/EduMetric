@@ -1,0 +1,46 @@
+# logs
+logs/
+
+# VCS
+.git
+.gitignore
+
+# Python cache/venv
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.venv/
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.pre-commit-cache/
+
+# Local runtime files
+venv
+env
+.venv
+**/.venv
+.env
+.env.*
+.env.example
+!.env.example
+
+# OS/Editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# other
+.justfile
+justfile
+.pre-commit-config.yaml
+tests
+**/tests/
+*/node_modules/
+*/dist/

@@ -7,6 +7,7 @@ dependencies = [
     "django-environ>=0.14.0",
     "djangorestframework>=3.18.3",
     "djangorestframework-simplejwt>=5.5.1",
+    "djangorestframework-stubs>=3.18.2",
     "psycopg2-binary>=2.9.13",
 ]
 
@@ -19,7 +20,16 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-
+src = ["."]
+extend-exclude = [
+    "*migrations/",
+    "*__init__.py",
+    "*__pycache__",
+    ".git/",
+    "env/",
+    ".venv/",
+    "static/",
+]
 [tool.ruff.lint]
 select = [
     "E",
@@ -27,7 +37,27 @@ select = [
     "I",
     "B",
     "UP",
+    "DJ",
+]
+ignore = [
+    "ARG001", # Unused function argument
+    "B008",  # do not perform function calls in argument defaults
+    "DJ001",  # Avoid using null=True on string-based fields
+    "F841", # Local variable is assigned to but never used
+    "RET504", # Unnecessary assignment before return statement
+    "UP015", # Unnecessary open mode parameters
 ]
 [tool.ruff.format]
 quote-style="double"
 indent-style = "space"
+
+[tool.ty]
+ignore = ["invalid-attribute-override","unresolved-attribute"]
+
+[toll.ty.src]
+include = ["**/*.py"]
+exclude = [
+    ".venv",
+    "migrations",
+    "__pycache__",
+]
