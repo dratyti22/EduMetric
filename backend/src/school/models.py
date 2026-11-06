@@ -30,3 +30,32 @@ class SchoolClass(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name}"
+
+
+
+
+class Student(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    school_class = models.ForeignKey(
+        "SchoolClass", on_delete=models.CASCADE, related_name="students"
+    )
+
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    middle_name = models.CharField(max_length=150, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self) -> str:
+        return f"{self.last_name} {self.first_name}"
+
+
+
+
