@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
 
     "src.user.apps.UserConfig",
+    'src.school.apps.SchoolConfig'
 ]
 
 MIDDLEWARE = [
