@@ -1,0 +1,157 @@
+from django.db import models, transaction
+from django.db.models import Count
+from django.shortcuts import get_object_or_404
+from rest_framework import generics, serializers, status
+from rest_framework.generics import UsesQuerySet
+from rest_framework.mixins import _MT
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from .models import Exam, ExamTemplate, StudentResult
+from .serializers import (
+    ExamTemplateSerializer,
+    ExamSerializer,
+    ExamCreateSerializer,
+    ExamTaskSerializer,
+    StudentResultSerializer,
+    BulkScoreSerializer,
+)
+from .services import sync_exam_students
+
+
+def exam_queryset(user):
+    return Exam.objects.filter(school_class__teacher=user)
+
+
+class ExamTemplateListView(generics.ListAPIView):
+    serializer_class = ExamTemplateSerializer
+
+    def get_queryset(self):
+        return (
+            ExamTemplate.objects.filter(subject="informatics")
+            .prefetch_related("tasks")
+            .order_by("-year")
+        )
+
+
+class ExamListCreateView(generics.ListCreateAPIView):
+    def get_queryset(self):
+        queryset = exam_queryset(self.request.user).select_related("school_class")
+        class_id = self.request.query_params.get("class_id")
+        if class_id:
+            queryset = queryset.filter(school_class_id=class_id)
+        return queryset
+
+    def get_serializer_class(self):
+        return ExamCreateSerializer if self.request.method == "POST" else ExamSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        exam = serializer.save()
+        return Response(ExamSerializer(exam).data, status=status.HTTP_201_CREATED)
+
+
+class ExamDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ExamSerializer
+
+    def get_queryset(self):
+        return exam_queryset(self.request.user)
+
+    def perform_update(self, serializer):
+        if serializer.instance.status == Exam.Status.COMPLETED:
+            raise serializers.ValidationError("Завершённый пробник нельзя редактировать.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.status == Exam.Status.COMPLETED:
+            raise serializers.ValidationError("Завершённый пробник нельзя удалить.")
+        instance.delete()
+
+
+class ExamTaskListView(generics.ListAPIView):
+    serializer_class = ExamTaskSerializer
+
+    def get_queryset(self):
+        exam = get_object_or_404(exam_queryset(self.request.user), pk=self.kwargs["exam_id"])
+        return exam.tasks.all()
+
+
+class ExamResultListView(generics.ListAPIView):
+    serializer_class = StudentResultSerializer
+
+    def get_queryset(self):
+        exam = get_object_or_404(exam_queryset(self.request.user), pk=self.kwargs["exam_id"])
+        return (
+            StudentResult.objects.filter(exam=exam)
+            .select_related("student", "exam", "exam__template")
+            .prefetch_related("task_results__task")
+            .order_by("student__last_name", "student__first_name")
+        )
+
+
+class StudentResultDetailView(generics.RetrieveAPIView):
+    serializer_class = StudentResultSerializer
+
+    def get_queryset(self):
+        return (
+            StudentResult.objects.filter(exam__school_class__teacher=self.request.user)
+            .select_related("student", "exam", "exam__template")
+            .prefetch_related("task_results__task")
+        )
+
+
+class StudentScoreUpdateView(APIView):
+    def patch(self, request, pk):
+        with transaction.atomic():
+            result = get_object_or_404(
+                StudentResult.objects.select_for_update().select_related("exam"),
+                pk=pk,
+                exam__school_class__teacher=request.user,
+            )
+            serializer = BulkScoreSerializer(data=request.data, context={"student_result": result})
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+        result = get_object_or_404(
+            StudentResult.objects.select_related(
+                "student", "exam", "exam__template"
+            ).prefetch_related("task_results__task"),
+            pk=result.pk,
+        )
+        return Response(StudentResultSerializer(result).data)
+
+
+class ExamSyncStudentsView(APIView):
+    def post(self, request, pk):
+        with transaction.atomic():
+            exam = get_object_or_404(exam_queryset(request.user).select_for_update(), pk=pk)
+            if exam.status == Exam.Status.COMPLETED:
+                return Response({"detail": "Пробник уже завершён."}, status=400)
+            added = sync_exam_students(exam)
+        return Response({"added_students": added})
+
+
+class ExamCompleteView(APIView):
+    def post(self, request, pk):
+        with transaction.atomic():
+            exam = get_object_or_404(exam_queryset(request.user).select_for_update(), pk=pk)
+            if exam.status == Exam.Status.COMPLETED:
+                return Response({"detail": "Пробник уже завершён."}, status=400)
+            results = StudentResult.objects.filter(exam=exam)
+            if not results.exists():
+                return Response({"detail": "В пробнике нет учеников."}, status=400)
+            task_count = exam.tasks.count()
+            if task_count == 0:
+                return Response({"detail": "В пробнике нет заданий."}, status=400)
+            has_any_scores = results.filter(task_results__score__isnull=False).exists()
+            if not has_any_scores:
+                return Response({"detail": "Не выставлено ни одного балла."}, status=400)
+            max_score = exam.max_primary_score
+            scale_scores = set(
+                exam.template.score_conversions.values_list("primary_score", flat=True)
+            )
+            if not set(range(max_score + 1)).issubset(scale_scores):
+                return Response({"detail": "Шкала перевода баллов неполная."}, status=400)
+            exam.status = Exam.Status.COMPLETED
+            exam.save(update_fields=["status", "updated_at"])
+        return Response({"id": str(exam.id), "status": exam.status})

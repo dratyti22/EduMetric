@@ -8,13 +8,7 @@ class SchoolClassSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SchoolClass
-        fields = (
-            "id",
-            "name",
-            "subject",
-            "teacher",
-            "created_at"
-        )
+        fields = ("id", "name", "subject", "teacher", "created_at")
         read_only_fields = ("id", "teacher", "created_at")
 
 
@@ -23,12 +17,5 @@ class StudentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Student
-        fields = (
-            "id",
-            "first_name",
-            "last_name",
-            "middle_name",
-            "school_class",
-            "created_at"
-        )
+        fields = ("id", "first_name", "last_name", "middle_name", "school_class", "created_at")
         read_only_fields = ("id", "school_class", "created_at")

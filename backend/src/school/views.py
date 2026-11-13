@@ -38,6 +38,4 @@ class ClassStudentDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = StudentSerializer
 
     def get_queryset(self) -> QuerySet:
-        return Student.objects.filter(
-            school_class__teacher=self.request.user
-        )
+        return Student.objects.filter(school_class__teacher=self.request.user)

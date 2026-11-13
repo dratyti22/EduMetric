@@ -8,14 +8,15 @@ User = get_user_model()
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     default_error_messages = {"invalid_credentials": "Неверный email или пароль."}
-    username_field = 'email'
+    username_field = "email"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields.pop('username', None)
-        self.fields['email'] = serializers.EmailField()
+        self.fields.pop("username", None)
+        self.fields["email"] = serializers.EmailField()
 
     def validate(self, attrs):
-        attrs['username'] = attrs.get('email')
+        attrs["username"] = attrs.get("email")
         return super().validate(attrs)
 
 

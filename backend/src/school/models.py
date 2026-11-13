@@ -23,15 +23,12 @@ class SchoolClass(models.Model):
         ordering = ["name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["teacher", "name", "subject"],
-                name="unique_teacher_class_subject"
+                fields=["teacher", "name", "subject"], name="unique_teacher_class_subject"
             )
         ]
 
     def __str__(self) -> str:
         return f"{self.name}"
-
-
 
 
 class Student(models.Model):
@@ -55,7 +52,3 @@ class Student(models.Model):
 
     def __str__(self) -> str:
         return f"{self.last_name} {self.first_name}"
-
-
-
-

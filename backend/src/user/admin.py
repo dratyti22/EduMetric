@@ -5,5 +5,4 @@ from src.user.models import User
 
 
 @admin.register(User)
-class UserAdmin(ModelAdmin):
-    ...
+class UserAdmin(ModelAdmin): ...
