@@ -47,9 +47,7 @@ class ExamSerializer(serializers.ModelSerializer):
     tasks = ExamTaskSerializer(many=True, read_only=True)
     task_count = serializers.IntegerField(read_only=True)
     max_primary_score = serializers.IntegerField(read_only=True)
-    school_class_name = serializers.CharField(
-        source="school_class.name", read_only=True
-    )
+    school_class_name = serializers.CharField(source="school_class.name", read_only=True)
 
     class Meta:
         model = Exam
@@ -92,9 +90,7 @@ class ExamCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=255)
     source = serializers.CharField(max_length=255, required=False, allow_blank=True)
     variant = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    school_class = serializers.PrimaryKeyRelatedField(
-        queryset=SchoolClass.objects.none()
-    )
+    school_class = serializers.PrimaryKeyRelatedField(queryset=SchoolClass.objects.none())
     subject = serializers.ChoiceField(choices=[])  # заполним в get_fields
     template = serializers.PrimaryKeyRelatedField(
         queryset=ExamTemplate.objects.all(), required=False, allow_null=True
@@ -102,9 +98,7 @@ class ExamCreateSerializer(serializers.Serializer):
     tasks = ExamTaskInputSerializer(many=True, required=False)
     academic_year = serializers.CharField(max_length=20, required=False)
     date = serializers.DateField(required=False)
-    passing_score_secondary = serializers.IntegerField(
-        min_value=0, max_value=100, required=False
-    )
+    passing_score_secondary = serializers.IntegerField(min_value=0, max_value=100, required=False)
     use_proportional_conversion = serializers.BooleanField(required=False, default=False)
 
     def get_fields(self):
@@ -112,6 +106,7 @@ class ExamCreateSerializer(serializers.Serializer):
         user = self.context["request"].user
         fields["school_class"].queryset = SchoolClass.objects.filter(teacher=user)
         from school.enum import Subject
+
         fields["subject"].choices = Subject.choices
         return fields
 
@@ -121,9 +116,7 @@ class ExamCreateSerializer(serializers.Serializer):
         subject = attrs["subject"]
 
         if not template and not tasks:
-            raise serializers.ValidationError(
-                "Укажите template или список tasks."
-            )
+            raise serializers.ValidationError("Укажите template или список tasks.")
 
         if template and template.subject != subject:
             raise serializers.ValidationError(
@@ -180,11 +173,7 @@ class StudentResultSerializer(serializers.ModelSerializer):
         return calculate_student_result(obj)
 
     def get_scores_by_number(self, obj):
-        return {
-            tr.task.number: tr.score
-            for tr in obj.task_results.all()
-            if tr.score is not None
-        }
+        return {tr.task.number: tr.score for tr in obj.task_results.all() if tr.score is not None}
 
 
 class ScoreInputSerializer(serializers.Serializer):
@@ -195,9 +184,7 @@ class ScoreInputSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if not attrs.get("task_id") and not attrs.get("task_number"):
-            raise serializers.ValidationError(
-                "Нужно указать task_id или task_number."
-            )
+            raise serializers.ValidationError("Нужно указать task_id или task_number.")
         return attrs
 
 
@@ -218,17 +205,13 @@ class BulkScoreSerializer(serializers.Serializer):
         exam = student_result.exam
 
         if exam.status == Exam.Status.COMPLETED:
-            raise serializers.ValidationError(
-                "Завершённый пробник нельзя изменять."
-            )
+            raise serializers.ValidationError("Завершённый пробник нельзя изменять.")
 
         submitted = self.validated_data["scores"]
         tasks_by_id = {t.id: t for t in exam.tasks.all()}
         tasks_by_number = {t.number: t for t in exam.tasks.all()}
 
-        results_qs = TaskResult.objects.select_for_update().filter(
-            student_result=student_result
-        )
+        results_qs = TaskResult.objects.select_for_update().filter(student_result=student_result)
         results_by_task_id = {r.task_id: r for r in results_qs}
 
         updated = []
@@ -262,3 +245,19 @@ class BulkScoreSerializer(serializers.Serializer):
             exam.save(update_fields=["status", "updated_at"])
 
         return student_result
+
+
+class ExamAnalyticsSerializer(serializers.Serializer):
+    total_students = serializers.IntegerField()
+    attended_students = serializers.IntegerField()
+    avg_primary = serializers.FloatField()
+    avg_secondary = serializers.FloatField()
+    max_secondary = serializers.IntegerField()
+    min_secondary = serializers.IntegerField()
+    passing_threshold = serializers.IntegerField()
+    passed_count = serializers.IntegerField()
+    passed_percent = serializers.IntegerField()
+    high_achievers_count = serializers.IntegerField()
+    high_achievers_percent = serializers.IntegerField()
+    score_distribution = serializers.ListField()
+    task_solvability = serializers.ListField()

@@ -1,5 +1,6 @@
 from django.urls import path
 from exams.views import (
+    ExamAnalyticsView,
     ExamCompleteView,
     ExamDetailView,
     ExamListCreateView,
@@ -40,5 +41,10 @@ urlpatterns = [
         "results/<uuid:pk>/scores/",
         StudentScoreUpdateView.as_view(),
         name="student-score-update",
+    ),
+    path(
+        "exams/<uuid:pk>/analytics/",
+        ExamAnalyticsView.as_view(),
+        name="exam-analytics",
     ),
 ]

@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import Optional
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -131,3 +134,165 @@ def calculate_student_result(student_result: StudentResult) -> dict:
         "total_tasks": total_tasks,
         "is_complete": complete,
     }
+
+
+@dataclass
+class ClassAnalyticsDTO:
+    total_students: int
+    attended_students: int
+    avg_primary: float
+    avg_secondary: float
+    max_secondary: int
+    min_secondary: int
+    passing_threshold: int
+    passed_count: int
+    passed_percent: int
+    high_achievers_count: int
+    high_achievers_percent: int
+    score_distribution: list[dict]
+    task_solvability: list[dict]
+
+
+def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnalyticsDTO:
+    from school.models import Student
+
+    students = list(Student.objects.filter(school_class=exam.school_class))
+    total_students = len(students)
+
+    # Все результаты с хотя бы одним выставленным баллом
+    results = (
+        StudentResult.objects.filter(exam=exam)
+        .prefetch_related("task_results__task")
+        .select_related("student")
+    )
+
+    # Считаем primary/secondary для каждого ученика
+    scored = []
+    for sr in results:
+        calc = calculate_student_result(sr)
+        if calc["primary_score"] is None:
+            continue  # нет ни одного балла — считаем неявка
+        scored.append(
+            {
+                "primary": calc["primary_score"],
+                "secondary": calc["secondary_score"] or 0,
+                "is_complete": calc["is_complete"],
+            }
+        )
+
+    attended = len(scored)
+    passing = threshold if threshold is not None else exam.passing_score_secondary
+
+    if attended == 0:
+        return ClassAnalyticsDTO(
+            total_students=total_students,
+            attended_students=0,
+            avg_primary=0,
+            avg_secondary=0,
+            max_secondary=0,
+            min_secondary=0,
+            passing_threshold=passing,
+            passed_count=0,
+            passed_percent=0,
+            high_achievers_count=0,
+            high_achievers_percent=0,
+            score_distribution=[
+                {"range": "0–39", "count": 0, "percent": 0},
+                {"range": "40–59", "count": 0, "percent": 0},
+                {"range": "60–79", "count": 0, "percent": 0},
+                {"range": "80–100", "count": 0, "percent": 0},
+            ],
+            task_solvability=[
+                {
+                    "task_number": t.number,
+                    "max_score": t.max_score,
+                    "avg_score": 0,
+                    "percent": 0,
+                }
+                for t in exam.tasks.all()
+            ],
+        )
+
+    primaries = [s["primary"] for s in scored]
+    secondaries = [s["secondary"] for s in scored]
+
+    avg_primary = round(sum(primaries) / attended, 1)
+    avg_secondary = round(sum(secondaries) / attended, 1)
+    max_sec = max(secondaries)
+    min_sec = min(secondaries)
+
+    passed_count = sum(1 for s in secondaries if s >= passing)
+    passed_percent = round(passed_count / attended * 100)
+
+    high_count = sum(1 for s in secondaries if s >= 80)
+    high_percent = round(high_count / attended * 100)
+
+    # Распределение
+    buckets = {"0–39": 0, "40–59": 0, "60–79": 0, "80–100": 0}
+    for v in secondaries:
+        if v < 40:
+            buckets["0–39"] += 1
+        elif v < 60:
+            buckets["40–59"] += 1
+        elif v < 80:
+            buckets["60–79"] += 1
+        else:
+            buckets["80–100"] += 1
+
+    score_distribution = [
+        {
+            "range": range_name,
+            "count": count,
+            "percent": round(count / attended * 100),
+        }
+        for range_name, count in buckets.items()
+    ]
+
+    # Решаемость заданий
+    task_solvability = []
+    for task in exam.tasks.all().order_by("number"):
+        scores = [
+            tr.score
+            for sr in results
+            for tr in sr.task_results.all()
+            if tr.task_id == task.id and tr.score is not None
+        ]
+        if not scores:
+            task_solvability.append(
+                {
+                    "task_number": task.number,
+                    "max_score": task.max_score,
+                    "avg_score": 0,
+                    "percent": 0,
+                }
+            )
+            continue
+
+        avg_score = round(sum(scores) / len(scores), 2)
+        max_possible = task.max_score * len(scores)
+        percent = round(sum(scores) / max_possible * 100) if max_possible else 0
+
+        task_solvability.append(
+            {
+                "task_number": task.number,
+                "max_score": task.max_score,
+                "avg_score": avg_score,
+                "percent": percent,
+            }
+        )
+
+    return ClassAnalyticsDTO(
+        total_students=total_students,
+        attended_students=attended,
+        avg_primary=avg_primary,
+        avg_secondary=avg_secondary,
+        max_secondary=max_sec,
+        min_secondary=min_sec,
+        passing_threshold=passing,
+        passed_count=passed_count,
+        passed_percent=passed_percent,
+        high_achievers_count=high_count,
+        high_achievers_percent=high_percent,
+        score_distribution=score_distribution,
+        task_solvability=task_solvability,
+    )
