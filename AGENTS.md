@@ -9,8 +9,10 @@ per-task scores, convert primary scores into secondary ones using FIPI scales, a
 and student performance.
 
 - Backend: Django 6.1 + DRF + SimpleJWT, PostgreSQL.
-- Frontend: Vue 3 + Vite + TypeScript (still the starter scaffold).
+- Frontend: Vue 3 + Vite + TypeScript SPA (Vue Router + Pinia).
 - Domain language (model `help_text`, `choices` labels, UI copy) is Russian; identifiers are English.
+- Naming note: the backend app is `exams`, but the frontend calls the same domain "mock tests"
+  (`stores/mockTests.ts`, `views/MockTestsView.vue`). It is one and the same feature.
 
 ## Structure
 
@@ -19,21 +21,27 @@ edumetric/
 ├── backend/                    # Django service; run manage.py from here
 │   ├── backend/                # project config: settings.py, urls.py, wsgi.py, asgi.py
 │   ├── src/
-│   │   ├── user/               # custom User (AUTH_USER_MODEL = "user.User"), JWT auth
-│   │   ├── school/             # SchoolClass, Student, Subject enum (school/enum.py)
-│   │   └── exams/              # ExamTemplate(+Task), ScoreConversion, Exam, ExamTask,
+│   │   ├── user/               # custom User (AUTH_USER_MODEL = "user.User"), JWT auth/registration
+│   │   ├── school/             # SchoolClass, Student, ClassJoinRequest; Subject enum (school/enum.py),
+│   │   │                       # join codes (codes.py), permissions.py; logic in services.py
+│   │   └── exams/              # ExamTemplate(+ExamTemplateTask), ScoreConversion, Exam(+ExamTask),
 │   │                           # StudentResult, TaskResult; business logic in services.py
 │   ├── templates/              # Django templates dir (console email backend configured)
 │   ├── manage.py
 │   ├── openapi.yaml            # hand-maintained OpenAPI 3.0.3 spec for the API
-│   ├── pyproject.toml          # uv deps, ruff, ty
-│   └── uv.lock
+│   ├── Dockerfile, entrypoint.sh  # container image: install deps + migrate + runserver (port 8000)
+│   └── pyproject.toml          # deps, ruff, ty
 ├── frontend/                   # Vue 3 + Vite + TS
-│   ├── src/                    # only App.vue and main.ts so far
+│   ├── src/
+│   │   ├── views/              # page components (Login, Dashboard, Classes, MockTests, ...)
+│   │   ├── stores/             # Pinia stores: auth, classes, mockTests, results
+│   │   ├── router/             # Vue Router routes
+│   │   ├── components/         # Modal.vue, Navbar.vue
+│   │   ├── types/              # shared TS types
+│   │   └── utils/              # scales.ts, storage.ts
 │   └── package.json, vite.config.ts, tsconfig*.json
-├── docs/                       # project documentation (empty)
-├── docker-compose.yaml         # Postgres 16 only
-├── .env / .env.example         # one shared env file for Django and compose
+├── docker-compose.yaml         # services: db (Postgres 16), backend (port 8000), frontend (port 5173)
+├── .env / .env.example         # one shared env file for Django, compose and containers
 └── Readme.md                   # Russian product overview
 ```
 
@@ -47,22 +55,25 @@ Application code imports apps as top-level modules (`from school.models import S
 - Env is read from the repo-root `.env` via `django-environ` (`BASE_DIR.parent / ".env"` in
   `backend/backend/settings.py`), never `backend/.env`. Copy `.env.example` and fill it in.
 - No defaults for `SECRET_KEY`, `ALLOWED_HOSTS`, or `DB_*` — the app fails to start without them.
-- `docker-compose.yaml` runs Postgres 16 only (`edumetric-db`, host port 5432) and reads
-  `POSTGRES_DB/POSTGRES_USER/POSTGRES_PASSWORD` from the same `.env`. Start: `docker compose up -d db`.
+- `docker-compose.yaml` runs three services, all reading the same `.env`:
+  - `db` — Postgres 16 (`edumetric-db`, host port 5432, healthcheck);
+  - `backend` — Django on port 8000 (`entrypoint.sh` runs `uv sync` + `migrate` + `runserver`);
+  - `frontend` — Vite dev server on port 5173.
+- Start: `docker compose up -d` (all three) or `docker compose up -d db` (only the database).
 - Settings basics: `LANGUAGE_CODE="ru-ru"`, `TIME_ZONE="UTC"`, `USE_TZ=True`,
   `django.contrib.postgres` installed, DRF defaults to JWT auth + `IsAuthenticated`.
 
 ## Backend (run from `backend/`)
 
-- Python >= 3.12, dependencies via `uv` (`pyproject.toml` / `uv.lock`; a local `.venv` may exist).
-- `uv run python manage.py migrate`, `runserver`, `makemigrations`, `createsuperuser`.
-- Tests: Django runner, `uv run python manage.py test`; `src/<app>/tests.py` modules are empty stubs.
-- FIPI data: `uv run python manage.py sedd_exam_templates` seeds `Subject` templates, tasks and
+- Python >= 3.12. Dependencies are declared in `pyproject.toml`; use the local `backend/.venv`
+  (activate it, or call `backend/.venv/bin/python` directly).
+- `python manage.py migrate`, `runserver`, `makemigrations`, `createsuperuser`.
+- Tests: Django runner, `python manage.py test`; `src/<app>/tests.py` modules are empty stubs.
+- FIPI data: `python manage.py sedd_exam_templates` seeds `Subject` templates, tasks and
   conversion scales (the command name has a typo — "sedd", not "seed").
-- Lint/format: `uv run ruff check .` and `uv run ruff format .` (line-length 100, target py312,
-  rules E/F/I/B/UP/DJ, migrations excluded).
-- Types: `uv run ty check`. `[tool.ty]` is read, but `[tool.ty.src]` is misspelled as `[toll.ty.src]`,
-  so its `include`/`exclude` are ignored.
+- Lint/format: `ruff check .` and `ruff format .` (line-length 100, target py312,
+  rules E/F/I/B/UP/DJ, migrations excluded; some rules are ignored — see `pyproject.toml`).
+- Types: `ty check`.
 - Routers: everything is under `/api/v1/`; `user/` holds auth/registration, `school` and `exams`
   mount on the bare `/api/v1/` prefix (see `backend/backend/urls.py`).
 
@@ -85,10 +96,12 @@ Application code imports apps as top-level modules (`from school.models import S
 ## Frontend (run from `frontend/`)
 
 - Node `^22.18.0 || >=24.12.0`. `npm run dev` (Vite), `npm run type-check` (`vue-tsc --build`),
-  `npm run build` (`run-p` of type-check and `vite build`).
-- Alias `@` -> `frontend/src`. Installed deps: Vue 3.5, Pinia, Vue Router, Axios, Vite 8, TS 6.
-- The UI is still the Vite starter screen; `Readme.md` describes a richer planned frontend
-  (views, stores, router) that does not exist in the repo yet.
+  `npm run build` (`run-p` of type-check and vite build).
+- Alias `@` -> `frontend/src`. Installed deps: Vue 3.5, Pinia, Vue Router, Axios, lucide icons,
+  Vite 8, TS 6, vue-tsc.
+- The UI is a full SPA: Vue Router routes in `src/router/`, state in Pinia stores (`src/stores/`),
+  pages in `src/views/`. API access goes through Axios (see the stores).
+- `Readme.md` (Russian) describes the frontend architecture — it matches the code.
 
 ## Conventions
 
@@ -96,18 +109,14 @@ Application code imports apps as top-level modules (`from school.models import S
   uniqueness via `Meta.constraints`, Russian `verbose`/`help_text` strings.
 - Scores are `PositiveIntegerField`s bounded by `max_score`; secondary scores are 0–100.
 - Keep views thin: query/aggregation logic goes to `services.py` or serializers.
-- Run `uv run ruff format .` before committing; double quotes are enforced.
+- Run `ruff format .` before committing; double quotes are enforced.
 
 ## Pitfalls
 
 - Do not import an app through `src.` (`from src.user.models import User`): that loads a second copy
   of the module, so models get registered twice. Always use the top-level names.
-- `exams` has models but no migrations yet; `migrate` will not create that schema until
-  `makemigrations exams` runs.
 - `manage.py` must be launched as a script (its `sys.path` fix-up lives there); a bare
   `django-admin` or an import from a different entry point will not find `user`/`school`/`exams`.
-- `docker-compose.yaml` mounts `./postgres_data:/var/lib/postgres/data`, but the official image
-  writes to `/var/lib/postgresql/data`, so database data is not actually persisted.
 - `.env` must satisfy both consumers: `DB_*` for Django and `POSTGRES_*` for the Postgres container.
-- `Readme.md` drifts from the code (paths like `~/Projs/...`, a non-existent `src/auth` app, a
-  frontend that has not been built yet), so verify structure against the tree above.
+- Backend domain is `exams`, frontend domain is "mock tests" — don't treat them as different
+  features when tracing code across the stack.
