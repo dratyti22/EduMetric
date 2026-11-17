@@ -43,9 +43,7 @@ class ExamTemplate(models.Model):
 
 class ExamTemplateTask(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    template = models.ForeignKey(
-        ExamTemplate, on_delete=models.CASCADE, related_name="tasks"
-    )
+    template = models.ForeignKey(ExamTemplate, on_delete=models.CASCADE, related_name="tasks")
     number = models.PositiveIntegerField()
     max_score = models.PositiveIntegerField(validators=[MinValueValidator(1)])
 
@@ -62,7 +60,7 @@ class ExamTemplateTask(models.Model):
 
 
 class ScoreConversion(models.Model):
-    """Шкала перевода первичный → вторичный балл (для шаблона)."""
+    """Шкала перевода первичный -> вторичный балл (для шаблона)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     template = models.ForeignKey(
@@ -94,11 +92,9 @@ class Exam(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=255)
-    source = models.CharField(max_length=255, blank=True)  # СтатГрад, ФИПИ и т.д.
+    source = models.CharField(max_length=255, blank=True)
     variant = models.CharField(max_length=100, blank=True)
-    school_class = models.ForeignKey(
-        SchoolClass, on_delete=models.CASCADE, related_name="exams"
-    )
+    school_class = models.ForeignKey(SchoolClass, on_delete=models.CASCADE, related_name="exams")
     # Если указан — берём шкалу перевода отсюда. Задания всё равно копируются в ExamTask.
     template = models.ForeignKey(
         ExamTemplate,
@@ -110,9 +106,7 @@ class Exam(models.Model):
     subject = models.CharField(max_length=30, choices=Subject.choices)
     academic_year = models.CharField(max_length=20, default="2025/2026")
     date = models.DateField(default=timezone.localdate)
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.DRAFT
-    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     passing_score_secondary = models.PositiveIntegerField(
         default=36, validators=[MaxValueValidator(100)]
     )
@@ -147,23 +141,19 @@ class Exam(models.Model):
         if primary >= max_p:
             return 100
 
-        # 1. Сначала пробуем шкалу шаблона
         if self.template_id:
             conv = (
-                ScoreConversion.objects.filter(
-                    template_id=self.template_id, primary_score=primary
-                )
+                ScoreConversion.objects.filter(template_id=self.template_id, primary_score=primary)
                 .values_list("test_score", flat=True)
                 .first()
             )
             if conv is not None:
                 return conv
 
-        # 2. Пропорциональный пересчёт
         if self.use_proportional_conversion or not self.template_id:
             return round(min(1.0, primary / max_p) * 100)
 
-        return None  # шкала неполная
+        return None
 
 
 class ExamTask(models.Model):
@@ -177,9 +167,7 @@ class ExamTask(models.Model):
     class Meta:
         ordering = ["number"]
         constraints = [
-            models.UniqueConstraint(
-                fields=["exam", "number"], name="unique_exam_task_number"
-            )
+            models.UniqueConstraint(fields=["exam", "number"], name="unique_exam_task_number")
         ]
 
     def __str__(self):
@@ -188,20 +176,14 @@ class ExamTask(models.Model):
 
 class StudentResult(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    exam = models.ForeignKey(
-        Exam, on_delete=models.CASCADE, related_name="student_results"
-    )
-    student = models.ForeignKey(
-        Student, on_delete=models.PROTECT, related_name="exam_results"
-    )
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name="student_results")
+    student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="exam_results")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["exam", "student"], name="unique_exam_student_result"
-            )
+            models.UniqueConstraint(fields=["exam", "student"], name="unique_exam_student_result")
         ]
 
     def __str__(self):
@@ -213,9 +195,7 @@ class TaskResult(models.Model):
     student_result = models.ForeignKey(
         StudentResult, on_delete=models.CASCADE, related_name="task_results"
     )
-    task = models.ForeignKey(
-        ExamTask, on_delete=models.CASCADE, related_name="student_scores"
-    )
+    task = models.ForeignKey(ExamTask, on_delete=models.CASCADE, related_name="student_scores")
     score = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:

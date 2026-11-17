@@ -25,6 +25,7 @@ edumetric/
 │   │                           # StudentResult, TaskResult; business logic in services.py
 │   ├── templates/              # Django templates dir (console email backend configured)
 │   ├── manage.py
+│   ├── openapi.yaml            # hand-maintained OpenAPI 3.0.3 spec for the API
 │   ├── pyproject.toml          # uv deps, ruff, ty
 │   └── uv.lock
 ├── frontend/                   # Vue 3 + Vite + TS
@@ -64,6 +65,22 @@ Application code imports apps as top-level modules (`from school.models import S
   so its `include`/`exclude` are ignored.
 - Routers: everything is under `/api/v1/`; `user/` holds auth/registration, `school` and `exams`
   mount on the bare `/api/v1/` prefix (see `backend/backend/urls.py`).
+
+## API contract
+
+- `backend/openapi.yaml` is the hand-maintained OpenAPI 3.0.3 description of the HTTP API.
+  Its `servers` entry is `/api/v1`, so paths inside the file are written without that prefix
+  (`/classes/` means `/api/v1/classes/`).
+- Any change to the API surface must be reflected in that file in the same change:
+  - added, renamed or removed routes and HTTP methods;
+  - request/response fields, types, required flags and examples;
+  - status codes and error responses;
+  - authentication or permission requirements.
+- Keep it in sync with the code (`backend/backend/urls.py`, `src/<app>/urls.py`, views and
+  serializers) — the code is the source of truth, the spec must match it. Bump `info.version`
+  when the published contract changes.
+- Unfinished modules stay out of the spec: the `exams` endpoints are currently hidden on purpose,
+  so add them only once the module is stable.
 
 ## Frontend (run from `frontend/`)
 

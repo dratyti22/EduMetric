@@ -1,0 +1,668 @@
+openapi: 3.0.3
+info:
+  title: EduMetric API
+  version: 1.3.0
+  description: API для веб-приложения EduMetric. Включает авторизацию с ролями, профиль пользователя, управление классами и учениками. Модуль пробников (Exams) временно скрыт.
+servers:
+  - url: /api/v1
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Необходима авторизация (отсутствует или недействителен JWT-токен)
+    Forbidden:
+      description: Недостаточно прав доступа
+    NotFound:
+      description: Объект не найден или не принадлежит текущему учителю
+    ValidationError:
+      description: Ошибка валидации входных данных
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  schemas:
+    Role:
+      type: string
+      enum: [teacher, student]
+      description: Роль пользователя. `teacher` — учитель, `student` — ученик.
+      example: student
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        email:
+          type: string
+          format: email
+          example: teacher@example.com
+        first_name:
+          type: string
+          example: Иван
+        last_name:
+          type: string
+          example: Иванов
+        middle_name:
+          type: string
+          nullable: true
+          example: Иванович
+        role:
+          $ref: '#/components/schemas/Role'
+        position:
+          type: string
+          description: Должность / квалификация. Не путать с системной ролью `role`.
+          example: Учитель высшей категории
+        subject:
+          type: string
+          description: Основной предмет (свободный текст).
+          example: Математика (профиль)
+        school:
+          type: string
+          example: Лицей «Вторая школа»
+        phone:
+          type: string
+          example: "+7 (999) 123-45-67"
+        bio:
+          type: string
+          example: Подготовка к ЕГЭ
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - first_name
+        - last_name
+        - password
+        - password_confirm
+      properties:
+        email:
+          type: string
+          format: email
+          example: teacher@example.com
+        first_name:
+          type: string
+          example: Иван
+        last_name:
+          type: string
+          example: Иванов
+        middle_name:
+          type: string
+          example: Иванович
+        password:
+          type: string
+          format: password
+          example: StrongPassword123!
+        password_confirm:
+          type: string
+          format: password
+          example: StrongPassword123!
+        role:
+          $ref: '#/components/schemas/Role'
+    ProfilePatchRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: teacher@example.com
+        first_name:
+          type: string
+          example: Иван
+        last_name:
+          type: string
+          example: Иванов
+        middle_name:
+          type: string
+          nullable: true
+          example: Иванович
+        position:
+          type: string
+          example: Учитель высшей категории
+        subject:
+          type: string
+          example: Математика (профиль)
+        school:
+          type: string
+          example: Лицей «Вторая школа»
+        phone:
+          type: string
+          example: "+7 (999) 123-45-67"
+        bio:
+          type: string
+          example: Подготовка к ЕГЭ
+      description: Роль изменить нельзя — поле `role` доступно только для чтения.
+    ChangePasswordRequest:
+      type: object
+      required:
+        - current_password
+        - new_password
+        - new_password_confirm
+      properties:
+        current_password:
+          type: string
+          format: password
+          example: OldPassword123!
+        new_password:
+          type: string
+          format: password
+          example: NewPassword123!
+        new_password_confirm:
+          type: string
+          format: password
+          example: NewPassword123!
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: teacher@example.com
+        password:
+          type: string
+          format: password
+          example: StrongPassword123!
+    TokenRefreshRequest:
+      type: object
+      required:
+        - refresh
+      properties:
+        refresh:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    TokenResponse:
+      type: object
+      properties:
+        refresh:
+          type: string
+        access:
+          type: string
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/TokenResponse'
+        - type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/User'
+    SchoolClass:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          example: "11А"
+        subject:
+          type: string
+          enum: [russian, informatics, math_profile]
+          example: informatics
+        teacher:
+          type: integer
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+    SchoolClassRequest:
+      type: object
+      required:
+        - name
+        - subject
+      properties:
+        name:
+          type: string
+          example: "11А"
+        subject:
+          type: string
+          enum: [russian, informatics, math_profile]
+          example: informatics
+    SchoolClassPatchRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "11Б"
+        subject:
+          type: string
+          enum: [russian, informatics, math_profile]
+          example: informatics
+    Student:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "770e8400-e29b-41d4-a716-446655440111"
+        first_name:
+          type: string
+          example: Пётр
+        last_name:
+          type: string
+          example: Петров
+        middle_name:
+          type: string
+          example: Петрович
+        school_class:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        created_at:
+          type: string
+          format: date-time
+    StudentRequest:
+      type: object
+      required:
+        - first_name
+        - last_name
+      properties:
+        first_name:
+          type: string
+          example: Пётр
+        last_name:
+          type: string
+          example: Петров
+        middle_name:
+          type: string
+          example: Петрович
+    StudentPatchRequest:
+      type: object
+      properties:
+        first_name:
+          type: string
+          example: Пётр
+        last_name:
+          type: string
+          example: Петров
+        middle_name:
+          type: string
+          example: Петрович
+security:
+  - BearerAuth: []
+paths:
+  /user/register/:
+    post:
+      summary: Регистрация пользователя (учителя или ученика)
+      tags:
+        - User
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Пользователь успешно зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+  /user/login/:
+    post:
+      summary: Авторизация (получение токенов)
+      tags:
+        - User
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Токены и данные пользователя успешно получены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /user/refresh/:
+    post:
+      summary: Обновление токена доступа
+      tags:
+        - User
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+      responses:
+        '200':
+          description: Новый токен доступа (и новый refresh при ROTATE_REFRESH_TOKENS=True)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access:
+                    type: string
+                  refresh:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /user/me/:
+    get:
+      summary: Получение данных текущего пользователя
+      tags:
+        - User
+      responses:
+        '200':
+          description: Данные профиля
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      summary: Частичное обновление текущего пользователя
+      description: Обновляет профиль. Поле `role` только для чтения.
+      tags:
+        - User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfilePatchRequest'
+      responses:
+        '200':
+          description: Обновлённые данные профиля
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /user/me/change-password/:
+    post:
+      summary: Смена пароля текущего пользователя
+      tags:
+        - User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Пароль изменён
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+                    example: Пароль успешно изменён.
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /classes/:
+    get:
+      summary: Получить список всех классов текущего учителя
+      tags:
+        - Classes
+      responses:
+        '200':
+          description: Список классов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SchoolClass'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      summary: Создать новый класс
+      tags:
+        - Classes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchoolClassRequest'
+      responses:
+        '201':
+          description: Класс создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolClass'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /classes/{id}/:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Получить данные конкретного класса
+      tags:
+        - Classes
+      responses:
+        '200':
+          description: Данные класса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolClass'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Полностью обновить класс
+      tags:
+        - Classes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchoolClassRequest'
+      responses:
+        '200':
+          description: Класс обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolClass'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Частично обновить класс
+      tags:
+        - Classes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchoolClassPatchRequest'
+      responses:
+        '200':
+          description: Класс обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolClass'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Удалить класс
+      tags:
+        - Classes
+      responses:
+        '204':
+          description: Класс удален
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /classes/{class_id}/students/:
+    parameters:
+      - name: class_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Получить список учеников класса
+      tags:
+        - Students
+      responses:
+        '200':
+          description: Список учеников
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Student'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Добавить ученика в класс
+      tags:
+        - Students
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudentRequest'
+      responses:
+        '201':
+          description: Ученик добавлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Student'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /students/{id}/:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Получить данные конкретного ученика
+      tags:
+        - Students
+      responses:
+        '200':
+          description: Данные ученика
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Student'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Полностью обновить ученика
+      tags:
+        - Students
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudentRequest'
+      responses:
+        '200':
+          description: Ученик обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Student'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Частично обновить ученика
+      tags:
+        - Students
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudentPatchRequest'
+      responses:
+        '200':
+          description: Ученик обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Student'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Удалить ученика
+      tags:
+        - Students
+      responses:
+        '204':
+          description: Ученик удален
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
