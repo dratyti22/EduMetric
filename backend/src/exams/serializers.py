@@ -261,3 +261,27 @@ class ExamAnalyticsSerializer(serializers.Serializer):
     high_achievers_percent = serializers.IntegerField()
     score_distribution = serializers.ListField()
     task_solvability = serializers.ListField()
+
+
+class ClassDynamicsItemSerializer(serializers.Serializer):
+    exam_id = serializers.CharField()
+    title = serializers.CharField()
+    date = serializers.CharField()
+    subject = serializers.CharField()
+    avg_primary = serializers.FloatField()
+    avg_secondary = serializers.FloatField()
+    attended_students = serializers.IntegerField()
+    passed_percent = serializers.IntegerField()
+    max_primary_score = serializers.IntegerField()
+
+
+class StudentHistoryItemSerializer(serializers.Serializer):
+    test_id = serializers.CharField()
+    title = serializers.CharField()
+    date = serializers.CharField()
+    subject = serializers.CharField()
+    primary_score = serializers.IntegerField()
+    secondary_score = serializers.IntegerField(allow_null=True)
+    max_primary_score = serializers.IntegerField()
+    scores = serializers.DictField()
+    is_complete = serializers.BooleanField()

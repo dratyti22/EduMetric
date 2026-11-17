@@ -20,7 +20,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["."]
+src = [".", "src"]
 extend-exclude = [
     "*migrations/",
     "*__init__.py",
@@ -54,7 +54,7 @@ indent-style = "space"
 [tool.ty]
 ignore = ["invalid-attribute-override","unresolved-attribute"]
 
-[toll.ty.src]
+[tool.ty.src]
 include = ["**/*.py"]
 exclude = [
     ".venv",

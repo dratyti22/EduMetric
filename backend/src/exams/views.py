@@ -1,20 +1,28 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Exam, ExamTemplate, StudentResult
 from .serializers import (
     BulkScoreSerializer,
+    ClassDynamicsItemSerializer,
     ExamAnalyticsSerializer,
     ExamCreateSerializer,
     ExamSerializer,
     ExamTaskSerializer,
     ExamTemplateSerializer,
+    StudentHistoryItemSerializer,
     StudentResultSerializer,
 )
-from .services import get_exam_analytics, sync_exam_students
+from .services import (
+    get_class_dynamics,
+    get_exam_analytics,
+    get_student_history,
+    sync_exam_students,
+)
 
 
 def exam_queryset(user):
@@ -161,14 +169,50 @@ class ExamAnalyticsView(APIView):
     GET /api/exams/{exam_id}/analytics/?threshold=27
     """
 
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, pk):
         exam = get_object_or_404(
             exam_queryset(request.user).prefetch_related("tasks"),
             pk=pk,
         )
-        threshold = request.query_params.get("threshold")
-        threshold = int(threshold) if threshold is not None else None
+        threshold_param = request.query_params.get("threshold")
+        threshold = int(threshold_param) if threshold_param is not None else None
 
         data = get_exam_analytics(exam, threshold=threshold)
         serializer = ExamAnalyticsSerializer(data.dict)
+        return Response(serializer.data)
+
+
+class ClassDynamicsView(APIView):
+    """
+    GET /api/classes/{class_id}/dynamics/
+    Динамика средних баллов по пробникам класса.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, class_id):
+        # Проверяем, что класс принадлежит учителю
+        from school.models import SchoolClass
+
+        get_object_or_404(SchoolClass, pk=class_id, teacher=request.user)
+
+        limit = int(request.query_params.get("limit", 10))
+        data = get_class_dynamics(class_id, request.user, limit=limit)
+        serializer = ClassDynamicsItemSerializer(data, many=True)
+        return Response(serializer.data)
+
+
+class StudentHistoryView(APIView):
+    """
+    GET /api/students/{student_id}/history/
+    История пробников ученика.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, student_id):
+        data = get_student_history(student_id, request.user)
+        serializer = StudentHistoryItemSerializer(data, many=True)
         return Response(serializer.data)

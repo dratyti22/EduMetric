@@ -45,9 +45,9 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "rest_framework",
     "rest_framework_simplejwt",
-    "src.user.apps.UserConfig",
-    "src.school.apps.SchoolConfig",
-    "src.exams.apps.ExamsConfig",
+    "user.apps.UserConfig",
+    "school.apps.SchoolConfig",
+    "exams.apps.ExamsConfig",
 ]
 
 MIDDLEWARE = [

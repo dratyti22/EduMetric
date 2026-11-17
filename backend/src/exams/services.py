@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
 
@@ -159,29 +160,42 @@ def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnal
     students = list(Student.objects.filter(school_class=exam.school_class))
     total_students = len(students)
 
-    # Все результаты с хотя бы одним выставленным баллом
     results = (
         StudentResult.objects.filter(exam=exam)
         .prefetch_related("task_results__task")
         .select_related("student")
     )
 
-    # Считаем primary/secondary для каждого ученика
     scored = []
     for sr in results:
         calc = calculate_student_result(sr)
         if calc["primary_score"] is None:
-            continue  # нет ни одного балла — считаем неявка
+            continue
         scored.append(
             {
                 "primary": calc["primary_score"],
                 "secondary": calc["secondary_score"] or 0,
-                "is_complete": calc["is_complete"],
             }
         )
 
     attended = len(scored)
     passing = threshold if threshold is not None else exam.passing_score_secondary
+
+    empty_distribution = [
+        {"range": "0–39", "count": 0, "percent": 0},
+        {"range": "40–59", "count": 0, "percent": 0},
+        {"range": "60–79", "count": 0, "percent": 0},
+        {"range": "80–100", "count": 0, "percent": 0},
+    ]
+    empty_solvability = [
+        {
+            "task_number": t.number,
+            "max_score": t.max_score,
+            "avg_score": 0,
+            "percent": 0,
+        }
+        for t in exam.tasks.all().order_by("number")
+    ]
 
     if attended == 0:
         return ClassAnalyticsDTO(
@@ -196,21 +210,8 @@ def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnal
             passed_percent=0,
             high_achievers_count=0,
             high_achievers_percent=0,
-            score_distribution=[
-                {"range": "0–39", "count": 0, "percent": 0},
-                {"range": "40–59", "count": 0, "percent": 0},
-                {"range": "60–79", "count": 0, "percent": 0},
-                {"range": "80–100", "count": 0, "percent": 0},
-            ],
-            task_solvability=[
-                {
-                    "task_number": t.number,
-                    "max_score": t.max_score,
-                    "avg_score": 0,
-                    "percent": 0,
-                }
-                for t in exam.tasks.all()
-            ],
+            score_distribution=empty_distribution,
+            task_solvability=empty_solvability,
         )
 
     primaries = [s["primary"] for s in scored]
@@ -227,7 +228,6 @@ def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnal
     high_count = sum(1 for s in secondaries if s >= 80)
     high_percent = round(high_count / attended * 100)
 
-    # Распределение
     buckets = {"0–39": 0, "40–59": 0, "60–79": 0, "80–100": 0}
     for v in secondaries:
         if v < 40:
@@ -241,22 +241,24 @@ def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnal
 
     score_distribution = [
         {
-            "range": range_name,
-            "count": count,
-            "percent": round(count / attended * 100),
+            "range": name,
+            "count": cnt,
+            "percent": round(cnt / attended * 100),
         }
-        for range_name, count in buckets.items()
+        for name, cnt in buckets.items()
     ]
 
-    # Решаемость заданий
+    # Решаемость
+    task_scores: dict[int, list[int]] = defaultdict(list)
+    task_max: dict[int, int] = {}
+    for sr in results:
+        for tr in sr.task_results.all():
+            if tr.score is not None:
+                task_scores[tr.task.number].append(tr.score)
+                task_max[tr.task.number] = tr.task.max_score
     task_solvability = []
     for task in exam.tasks.all().order_by("number"):
-        scores = [
-            tr.score
-            for sr in results
-            for tr in sr.task_results.all()
-            if tr.task_id == task.id and tr.score is not None
-        ]
+        scores = task_scores.get(task.number, [])
         if not scores:
             task_solvability.append(
                 {
@@ -267,11 +269,9 @@ def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnal
                 }
             )
             continue
-
         avg_score = round(sum(scores) / len(scores), 2)
         max_possible = task.max_score * len(scores)
         percent = round(sum(scores) / max_possible * 100) if max_possible else 0
-
         task_solvability.append(
             {
                 "task_number": task.number,
@@ -296,3 +296,73 @@ def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnal
         score_distribution=score_distribution,
         task_solvability=task_solvability,
     )
+
+
+def get_class_dynamics(class_id, user, limit: int = 10) -> list[dict]:
+    """
+    Динамика средних баллов по пробникам класса (от старых к новым).
+    """
+    exams = (
+        Exam.objects.filter(school_class_id=class_id, school_class__teacher=user)
+        .prefetch_related("tasks", "student_results__task_results")
+        .order_by("date", "created_at")[:limit]
+    )
+
+    dynamics = []
+    for exam in exams:
+        analytics = get_exam_analytics(exam)
+        dynamics.append(
+            {
+                "exam_id": str(exam.id),
+                "title": exam.title,
+                "date": exam.date.isoformat(),
+                "subject": exam.subject,
+                "avg_primary": analytics.avg_primary,
+                "avg_secondary": analytics.avg_secondary,
+                "attended_students": analytics.attended_students,
+                "passed_percent": analytics.passed_percent,
+                "max_primary_score": exam.max_primary_score,
+            }
+        )
+    return dynamics
+
+
+def get_student_history(student_id, user) -> list[dict]:
+    """
+    История пробников конкретного ученика.
+    """
+    from school.models import Student
+
+    student = Student.objects.filter(id=student_id, school_class__teacher=user).first()
+    if not student:
+        return []
+
+    results = (
+        StudentResult.objects.filter(student=student)
+        .select_related("exam", "exam__template")
+        .prefetch_related("task_results__task")
+        .order_by("examdate", "examcreated_at")
+    )
+
+    history = []
+    for sr in results:
+        calc = calculate_student_result(sr)
+        if calc["primary_score"] is None:
+            continue
+
+        scores = {tr.task.number: tr.score for tr in sr.task_results.all() if tr.score is not None}
+
+        history.append(
+            {
+                "test_id": str(sr.exam.id),
+                "title": sr.exam.title,
+                "date": sr.exam.date.isoformat(),
+                "subject": sr.exam.subject,
+                "primary_score": calc["primary_score"],
+                "secondary_score": calc["secondary_score"],
+                "max_primary_score": sr.exam.max_primary_score,
+                "scores": scores,
+                "is_complete": calc["is_complete"],
+            }
+        )
+    return history

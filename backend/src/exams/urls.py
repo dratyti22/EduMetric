@@ -1,5 +1,6 @@
 from django.urls import path
 from exams.views import (
+    ClassDynamicsView,
     ExamAnalyticsView,
     ExamCompleteView,
     ExamDetailView,
@@ -8,6 +9,7 @@ from exams.views import (
     ExamSyncStudentsView,
     ExamTaskListView,
     ExamTemplateListView,
+    StudentHistoryView,
     StudentResultDetailView,
     StudentScoreUpdateView,
 )
@@ -46,5 +48,15 @@ urlpatterns = [
         "exams/<uuid:pk>/analytics/",
         ExamAnalyticsView.as_view(),
         name="exam-analytics",
+    ),
+    path(
+        "classes/<uuid:class_id>/dynamics/",
+        ClassDynamicsView.as_view(),
+        name="class-dynamics",
+    ),
+    path(
+        "students/<uuid:student_id>/history/",
+        StudentHistoryView.as_view(),
+        name="student-history",
     ),
 ]
