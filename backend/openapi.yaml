@@ -1,8 +1,11 @@
 openapi: 3.0.3
 info:
   title: EduMetric API
-  version: 1.3.0
-  description: API для веб-приложения EduMetric. Включает авторизацию с ролями, профиль пользователя, управление классами и учениками. Модуль пробников (Exams) временно скрыт.
+  version: 1.4.0
+  description: >
+    API для веб-приложения EduMetric. Авторизация с ролями, профиль, классы с кодом
+    вступления, подтверждение привязки аккаунта ученика и пробники. Учитель публикует
+    пробник, после чего ученик заполняет свою ведомость баллами от 0.
 servers:
   - url: /api/v1
 components:
@@ -206,8 +209,18 @@ components:
           enum: [russian, informatics, math_profile]
           example: informatics
         teacher:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        join_code:
+          type: string
+          readOnly: true
+          description: Код вступления. Префикс EX- и 8 символов без o, O и 0.
+          example: EX-7K4p9M2A
+        students_count:
           type: integer
-          example: 1
+          readOnly: true
+          example: 12
         created_at:
           type: string
           format: date-time
@@ -254,6 +267,11 @@ components:
           type: string
           format: uuid
           example: "550e8400-e29b-41d4-a716-446655440000"
+        is_linked:
+          type: boolean
+          readOnly: true
+          description: true, если карточка привязана к аккаунту ученика.
+          example: false
         created_at:
           type: string
           format: date-time

@@ -1,9 +1,10 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from school.permissions import IsStudent, IsTeacher
 
 from .models import Exam, ExamTemplate, StudentResult
 from .serializers import (
@@ -20,7 +21,10 @@ from .serializers import (
 from .services import (
     get_class_dynamics,
     get_exam_analytics,
+    get_linked_student,
     get_student_history,
+    publish_exam,
+    student_exam_queryset,
     sync_exam_students,
 )
 
@@ -31,6 +35,7 @@ def exam_queryset(user):
 
 class ExamTemplateListView(generics.ListAPIView):
     serializer_class = ExamTemplateSerializer
+    permission_classes = [IsTeacher]
 
     def get_queryset(self):
         qs = ExamTemplate.objects.prefetch_related("tasks", "score_conversions")
@@ -44,6 +49,8 @@ class ExamTemplateListView(generics.ListAPIView):
 
 
 class ExamListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsTeacher]
+
     def get_queryset(self):
         qs = (
             exam_queryset(self.request.user)
@@ -67,6 +74,7 @@ class ExamListCreateView(generics.ListCreateAPIView):
 
 class ExamDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ExamSerializer
+    permission_classes = [IsTeacher]
 
     def get_queryset(self):
         return exam_queryset(self.request.user).prefetch_related("tasks")
@@ -84,6 +92,7 @@ class ExamDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class ExamTaskListView(generics.ListAPIView):
     serializer_class = ExamTaskSerializer
+    permission_classes = [IsTeacher]
 
     def get_queryset(self):
         exam = get_object_or_404(exam_queryset(self.request.user), pk=self.kwargs["exam_id"])
@@ -92,6 +101,7 @@ class ExamTaskListView(generics.ListAPIView):
 
 class ExamResultListView(generics.ListAPIView):
     serializer_class = StudentResultSerializer
+    permission_classes = [IsTeacher]
 
     def get_queryset(self):
         exam = get_object_or_404(exam_queryset(self.request.user), pk=self.kwargs["exam_id"])
@@ -105,6 +115,7 @@ class ExamResultListView(generics.ListAPIView):
 
 class StudentResultDetailView(generics.RetrieveAPIView):
     serializer_class = StudentResultSerializer
+    permission_classes = [IsTeacher]
 
     def get_queryset(self):
         return (
@@ -115,14 +126,26 @@ class StudentResultDetailView(generics.RetrieveAPIView):
 
 
 class StudentScoreUpdateView(APIView):
+    """Учитель заполняет ведомость. Пустой балл (null) допустим только у ручных учеников."""
+
+    permission_classes = [IsTeacher]
+
     def patch(self, request, pk):
         with transaction.atomic():
             result = get_object_or_404(
-                StudentResult.objects.select_for_update().select_related("exam"),
+                StudentResult.objects.select_for_update().select_related("exam", "student"),
                 pk=pk,
                 exam__school_class__teacher=request.user,
             )
-            serializer = BulkScoreSerializer(data=request.data, context={"student_result": result})
+            if result.student.user_id is not None:
+                return Response(
+                    {"detail": "Этого ученика заполняет он сам."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            serializer = BulkScoreSerializer(
+                data=request.data,
+                context={"student_result": result, "filled_by_student": False},
+            )
             serializer.is_valid(raise_exception=True)
             serializer.save()
 
@@ -136,6 +159,8 @@ class StudentScoreUpdateView(APIView):
 
 
 class ExamSyncStudentsView(APIView):
+    permission_classes = [IsTeacher]
+
     def post(self, request, pk):
         with transaction.atomic():
             exam = get_object_or_404(exam_queryset(request.user).select_for_update(), pk=pk)
@@ -145,7 +170,21 @@ class ExamSyncStudentsView(APIView):
         return Response({"added_students": added})
 
 
+class ExamPublishView(APIView):
+    """Переводит пробник в «в процессе» и открывает его ученикам с аккаунтом."""
+
+    permission_classes = [IsTeacher]
+
+    def post(self, request, pk):
+        with transaction.atomic():
+            exam = get_object_or_404(exam_queryset(request.user).select_for_update(), pk=pk)
+            added = publish_exam(exam)
+        return Response({"id": str(exam.id), "status": exam.status, "added_students": added})
+
+
 class ExamCompleteView(APIView):
+    permission_classes = [IsTeacher]
+
     def post(self, request, pk):
         with transaction.atomic():
             exam = get_object_or_404(exam_queryset(request.user).select_for_update(), pk=pk)
@@ -164,12 +203,79 @@ class ExamCompleteView(APIView):
         return Response({"id": str(exam.id), "status": exam.status})
 
 
+class MyExamListView(generics.ListAPIView):
+    """Пробники классов, в которых состоит ученик. Черновики скрыты."""
+
+    serializer_class = ExamSerializer
+    permission_classes = [IsStudent]
+
+    def get_queryset(self):
+        qs = (
+            student_exam_queryset(self.request.user)
+            .select_related("school_class", "template")
+            .prefetch_related("tasks")
+        )
+        class_id = self.request.query_params.get("class_id")
+        if class_id:
+            qs = qs.filter(school_class_id=class_id)
+        return qs
+
+
+class MyExamResultView(APIView):
+    permission_classes = [IsStudent]
+
+    def get(self, request, pk):
+        exam = get_object_or_404(student_exam_queryset(request.user), pk=pk)
+        student = get_linked_student(request.user, exam.school_class_id)
+        result = get_object_or_404(
+            StudentResult.objects.select_related(
+                "student", "exam", "exam__template"
+            ).prefetch_related("task_results__task"),
+            exam=exam,
+            student=student,
+        )
+        return Response(StudentResultSerializer(result).data)
+
+
+class MyExamScoreUpdateView(APIView):
+    """Ученик заполняет только свою ведомость. Каждое задание — число от 0 до максимума."""
+
+    permission_classes = [IsStudent]
+
+    def patch(self, request, pk):
+        with transaction.atomic():
+            exam = get_object_or_404(
+                student_exam_queryset(request.user).select_for_update(),
+                pk=pk,
+            )
+            student = get_linked_student(request.user, exam.school_class_id)
+            result = get_object_or_404(
+                StudentResult.objects.select_for_update().select_related("exam", "student"),
+                exam=exam,
+                student=student,
+            )
+            serializer = BulkScoreSerializer(
+                data=request.data,
+                context={"student_result": result, "filled_by_student": True},
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+        result = get_object_or_404(
+            StudentResult.objects.select_related(
+                "student", "exam", "exam__template"
+            ).prefetch_related("task_results__task"),
+            pk=result.pk,
+        )
+        return Response(StudentResultSerializer(result).data)
+
+
 class ExamAnalyticsView(APIView):
     """
     GET /api/exams/{exam_id}/analytics/?threshold=27
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsTeacher]
 
     def get(self, request, pk):
         exam = get_object_or_404(
@@ -190,7 +296,7 @@ class ClassDynamicsView(APIView):
     Динамика средних баллов по пробникам класса.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsTeacher]
 
     def get(self, request, class_id):
         # Проверяем, что класс принадлежит учителю
@@ -210,7 +316,7 @@ class StudentHistoryView(APIView):
     История пробников ученика.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsTeacher | IsStudent]
 
     def get(self, request, student_id):
         data = get_student_history(student_id, request.user)

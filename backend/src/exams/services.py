@@ -1,10 +1,10 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
+
 from school.models import Student
 
 from .models import Exam, ExamTask, ExamTemplate, StudentResult, TaskResult
@@ -78,7 +78,7 @@ def create_exam(
         [ExamTask(exam=exam, number=t["number"], max_score=t["max_score"]) for t in final_tasks]
     )
 
-    # Создаём пустые результаты для всех учеников класса
+    # Ведомость сразу для всех, кто уже в классе. Кто вступит позже — попадёт при публикации.
     students = list(Student.objects.filter(school_class=school_class))
     results = StudentResult.objects.bulk_create(
         [StudentResult(exam=exam, student=s) for s in students]
@@ -154,7 +154,7 @@ class ClassAnalyticsDTO:
     task_solvability: list[dict]
 
 
-def get_exam_analytics(exam: Exam, threshold: Optional[int] = None) -> ClassAnalyticsDTO:
+def get_exam_analytics(exam: Exam, threshold: int | None = None) -> ClassAnalyticsDTO:
     from school.models import Student
 
     students = list(Student.objects.filter(school_class=exam.school_class))
@@ -327,13 +327,41 @@ def get_class_dynamics(class_id, user, limit: int = 10) -> list[dict]:
     return dynamics
 
 
+def publish_exam(exam: Exam) -> int:
+    """Открывает пробник ученикам и создаёт им пустые ведомости."""
+    if exam.status == Exam.Status.COMPLETED:
+        raise ValidationError("Завершённый пробник нельзя опубликовать.")
+    if exam.tasks.count() == 0:
+        raise ValidationError("В пробнике нет заданий.")
+
+    added = sync_exam_students(exam)
+    if exam.status == Exam.Status.DRAFT:
+        exam.status = Exam.Status.IN_PROGRESS
+        exam.save(update_fields=["status", "updated_at"])
+    return added
+
+
+def student_exam_queryset(user):
+    return Exam.objects.filter(
+        status__in=(Exam.Status.IN_PROGRESS, Exam.Status.COMPLETED),
+        school_class__students__user=user,
+    ).distinct()
+
+
+def get_linked_student(user, school_class_id):
+    return Student.objects.filter(user=user, school_class_id=school_class_id).first()
+
+
 def get_student_history(student_id, user) -> list[dict]:
     """
     История пробников конкретного ученика.
     """
     from school.models import Student
 
-    student = Student.objects.filter(id=student_id, school_class__teacher=user).first()
+    if getattr(user, "is_student", False):
+        student = Student.objects.filter(id=student_id, user=user).first()
+    else:
+        student = Student.objects.filter(id=student_id, school_class__teacher=user).first()
     if not student:
         return []
 

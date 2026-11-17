@@ -2,8 +2,9 @@ from django.db import transaction
 from rest_framework import serializers
 
 from school.models import SchoolClass
-from .models import Exam, ExamTemplate, ExamTask, StudentResult, TaskResult
-from .services import create_exam, calculate_student_result, current_academic_year
+
+from .models import Exam, ExamTask, ExamTemplate, StudentResult, TaskResult
+from .services import calculate_student_result, create_exam
 
 
 class ExamTemplateTaskSerializer(serializers.ModelSerializer):
@@ -180,11 +181,13 @@ class ScoreInputSerializer(serializers.Serializer):
     # Можно передавать либо task_id, либо task_number
     task_id = serializers.UUIDField(required=False)
     task_number = serializers.IntegerField(required=False, min_value=1)
-    score = serializers.IntegerField(min_value=0, allow_null=True)
+    score = serializers.IntegerField(min_value=0, allow_null=True, required=False)
 
     def validate(self, attrs):
         if not attrs.get("task_id") and not attrs.get("task_number"):
             raise serializers.ValidationError("Нужно указать task_id или task_number.")
+        if "score" not in attrs:
+            raise serializers.ValidationError("Нужно указать score.")
         return attrs
 
 
@@ -203,9 +206,12 @@ class BulkScoreSerializer(serializers.Serializer):
     def save(self, **kwargs):
         student_result = self.context["student_result"]
         exam = student_result.exam
+        filled_by_student = self.context.get("filled_by_student", False)
 
         if exam.status == Exam.Status.COMPLETED:
             raise serializers.ValidationError("Завершённый пробник нельзя изменять.")
+        if filled_by_student and exam.status != Exam.Status.IN_PROGRESS:
+            raise serializers.ValidationError("Пробник ещё не опубликован.")
 
         submitted = self.validated_data["scores"]
         tasks_by_id = {t.id: t for t in exam.tasks.all()}
@@ -230,6 +236,10 @@ class BulkScoreSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Результат по заданию не найден.")
 
             score = item["score"]
+            if filled_by_student and score is None:
+                raise serializers.ValidationError(
+                    {str(task.number): "Ученик не может оставить задание пустым. Минимум — 0."}
+                )
             if score is not None and score > task.max_score:
                 raise serializers.ValidationError(
                     {str(task.number): f"Балл превышает максимум ({task.max_score})."}
