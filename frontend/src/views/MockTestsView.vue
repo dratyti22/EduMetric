@@ -6,7 +6,7 @@ import { useClassesStore } from '../stores/classes';
 import { useResultsStore } from '../stores/results';
 import { AVAILABLE_SUBJECTS, getDefaultTasksForSubject, calculateMaxPrimary, SUBJECT_PRESETS } from '../utils/scales';
 import type { MockTest, TaskSpec } from '../types';
-import { subjectId, subjectLabel } from '../utils/subjects';
+import { SUBJECTS, subjectId, subjectLabel } from '../utils/subjects';
 import Modal from '../components/Modal.vue';
 import {
   FileCheck2,
@@ -27,7 +27,7 @@ const mockTestsStore = useMockTestsStore();
 const classesStore = useClassesStore();
 const resultsStore = useResultsStore();
 
-const defaultSubject = AVAILABLE_SUBJECTS[0] ?? 'Математика (профиль)';
+const defaultSubject = subjectId(AVAILABLE_SUBJECTS[0] ?? 'Математика (профиль)');
 
 // Фильтры
 const filterClassId = ref('');
@@ -70,8 +70,7 @@ watch(
     if (!isEditing.value && newClassId) {
       const cls = classesStore.getClassById(newClassId);
       if (cls) {
-        testForm.value.subject = cls.subject;
-        loadSubjectDefaults(cls.subject);
+         loadSubjectDefaults(cls.subject);
       }
     }
   }
@@ -101,7 +100,7 @@ function openCreateModal() {
 
   const firstClass = classesStore.classes[0];
   const initialClassId = firstClass ? firstClass.id : '';
-  const initialSubject = firstClass ? firstClass.subject : defaultSubject;
+  const initialSubject = subjectId(firstClass?.subject || defaultSubject);
 
   testForm.value = {
     title: '',
@@ -109,8 +108,8 @@ function openCreateModal() {
     classId: initialClassId,
     subject: initialSubject,
     academicYear: '2025/2026',
-    passingScoreSecondary: SUBJECT_PRESETS[initialSubject]?.defaultPassingSecondary || 36,
-    tasks: getDefaultTasksForSubject(initialSubject),
+    passingScoreSecondary: SUBJECT_PRESETS[subjectLabel(initialSubject)]?.defaultPassingSecondary || 36,
+    tasks: getDefaultTasksForSubject(subjectLabel(initialSubject)),
   };
   showTaskCustomizer.value = false;
   isModalOpen.value = true;
@@ -234,7 +233,7 @@ const filteredTests = computed(() => {
           <select v-model="filterClassId" class="form-select select-sm">
             <option value="">Все классы</option>
             <option v-for="cls in classesStore.classes" :key="cls.id" :value="cls.id">
-              {{ cls.number }} «{{ cls.letter }}» ({{ cls.subject }})
+              {{ cls.number }} «{{ cls.letter }}» ({{ subjectLabel(cls.subject) }})
             </option>
           </select>
         </div>
@@ -243,8 +242,8 @@ const filteredTests = computed(() => {
           <label class="filter-label">Предмет:</label>
           <select v-model="filterSubject" class="form-select select-sm">
             <option value="">Все предметы</option>
-            <option v-for="sub in AVAILABLE_SUBJECTS" :key="sub" :value="sub">
-              {{ sub }}
+            <option v-for="sub in SUBJECTS" :key="sub.id" :value="sub.id">
+              {{ sub.name }}
             </option>
           </select>
         </div>
@@ -270,7 +269,7 @@ const filteredTests = computed(() => {
         <div class="test-card-top">
           <div class="badges-row">
             <span class="badge badge-primary">{{ getClassName(test.classId) }}</span>
-            <span class="badge badge-gray">{{ test.subject }}</span>
+            <span class="badge badge-gray">{{ subjectLabel(test.subject) }}</span>
             <span v-if="hasResults(test.id)" class="badge badge-success">
               <CheckCircle2 :size="13" /> Заполнен ({{ getFilledCount(test) }})
             </span>
@@ -347,7 +346,7 @@ const filteredTests = computed(() => {
             <select v-model="testForm.classId" class="form-select" required>
               <option disabled value="">Выберите класс</option>
               <option v-for="cls in classesStore.classes" :key="cls.id" :value="cls.id">
-                {{ cls.number }} «{{ cls.letter }}» — {{ cls.subject }}
+                {{ cls.number }} «{{ cls.letter }}» — {{ subjectLabel(cls.subject) }}
               </option>
             </select>
           </div>
@@ -359,7 +358,7 @@ const filteredTests = computed(() => {
               class="form-select"
               @change="loadSubjectDefaults(testForm.subject)"
             >
-              <option v-for="sub in AVAILABLE_SUBJECTS" :key="sub" :value="sub">{{ sub }}</option>
+              <option v-for="sub in SUBJECTS" :key="sub.id" :value="sub.id">{{ sub.name }}</option>
             </select>
           </div>
         </div>

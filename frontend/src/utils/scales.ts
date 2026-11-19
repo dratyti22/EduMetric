@@ -180,10 +180,15 @@ export const AVAILABLE_SUBJECTS = Object.keys(SUBJECT_PRESETS);
 export function convertPrimaryToSecondary(
   primaryScore: number,
   maxPrimaryScore: number,
-  subjectName: string
+  subjectName: string,
+  forceProportional = false,
 ): number {
   if (primaryScore <= 0) return 0;
   if (primaryScore >= maxPrimaryScore && maxPrimaryScore > 0) return 100;
+
+  if (forceProportional) {
+    return maxPrimaryScore <= 0 ? 0 : Math.round(Math.min(1, primaryScore / maxPrimaryScore) * 100);
+  }
 
   const preset = SUBJECT_PRESETS[subjectName];
   if (preset && preset.conversionTable && Object.keys(preset.conversionTable).length > 0) {

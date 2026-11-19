@@ -71,7 +71,7 @@ def create_exam(
             if passing_score_secondary is not None
             else (template.default_passing_secondary if template else 36)
         ),
-        use_proportional_conversion=use_proportional_conversion or (template is None),
+        use_proportional_conversion=use_proportional_conversion,
     )
 
     exam_tasks = ExamTask.objects.bulk_create(

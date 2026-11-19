@@ -5,6 +5,7 @@ import { useMockTestsStore } from '../stores/mockTests';
 import { useClassesStore } from '../stores/classes';
 import { useResultsStore } from '../stores/results';
 import { convertPrimaryToSecondary } from '../utils/scales';
+import { subjectLabel } from '../utils/subjects';
 import type { MockTest, Student } from '../types';
 import {
   Save,
@@ -119,7 +120,14 @@ function getStudentPrimary(studentId: string): number {
 function getStudentSecondary(studentId: string): number {
   if (!test.value) return 0;
   const prim = getStudentPrimary(studentId);
-  return convertPrimaryToSecondary(prim, test.value.maxPrimaryScore, test.value.subject);
+  // У пробника без шаблона нет шкалы ФИПИ: backend переводит его
+  // пропорционально относительно суммы максимумов кастомных заданий.
+  return convertPrimaryToSecondary(
+    prim,
+    test.value.maxPrimaryScore,
+    subjectLabel(test.value.subject),
+    !test.value.template || test.value.use_proportional_conversion,
+  );
 }
 
 // Проверка, заполнен ли хотя бы один ответ у ученика
