@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useMockTestsStore } from '../stores/mockTests';
 import { useClassesStore } from '../stores/classes';
 import { useResultsStore } from '../stores/results';
+import { useAuthStore } from '../stores/auth';
 import { AVAILABLE_SUBJECTS, getDefaultTasksForSubject, calculateMaxPrimary, SUBJECT_PRESETS } from '../utils/scales';
 import type { MockTest, TaskSpec } from '../types';
 import { SUBJECTS, subjectId, subjectLabel } from '../utils/subjects';
@@ -26,6 +27,9 @@ const router = useRouter();
 const mockTestsStore = useMockTestsStore();
 const classesStore = useClassesStore();
 const resultsStore = useResultsStore();
+const authStore = useAuthStore();
+const pageError = ref('');
+const publishingId = ref('');
 
 const defaultSubject = subjectId(AVAILABLE_SUBJECTS[0] ?? 'Математика (профиль)');
 
@@ -59,9 +63,25 @@ const testForm = ref<{
 const showTaskCustomizer = ref(false);
 
 onMounted(async () => {
-  if (!mockTestsStore.loaded) await mockTestsStore.fetchExams();
-  if (mockTestsStore.templates.length === 0) await mockTestsStore.fetchTemplates();
+  try {
+    await mockTestsStore.fetchExams();
+    if (authStore.isTeacher && mockTestsStore.templates.length === 0) await mockTestsStore.fetchTemplates();
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить пробники';
+  }
 });
+
+async function publishTest(test: MockTest) {
+  publishingId.value = test.id;
+  pageError.value = '';
+  try {
+    await mockTestsStore.publishExam(test.id);
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Не удалось опубликовать пробник';
+  } finally {
+    publishingId.value = '';
+  }
+}
 
 // Автоподстановка предмета при выборе класса
 watch(
@@ -193,13 +213,13 @@ function getClassName(classId: string) {
 
 function hasResults(testId: string) {
   const sheet = resultsStore.resultSheets.find((s) => s.mockTestId === testId);
-  return sheet && Object.keys(sheet.studentScores).length > 0;
+  return sheet && Object.values(sheet.studentScores).some((student) => Object.keys(student.scores).length > 0);
 }
 
 function getFilledCount(test: MockTest) {
   const sheet = resultsStore.resultSheets.find((s) => s.mockTestId === test.id);
   const students = classesStore.getStudentsByClass(test.classId);
-  const count = sheet ? Object.keys(sheet.studentScores).length : 0;
+  const count = sheet ? Object.values(sheet.studentScores).filter((student) => Object.keys(student.scores).length > 0).length : 0;
   return `${count} из ${students.length}`;
 }
 
@@ -219,12 +239,13 @@ const filteredTests = computed(() => {
         <h1 class="page-title">Раздел «Пробники»</h1>
         <p class="page-subtitle">Создание диагностических срезов, назначение дат и спецификации заданий</p>
       </div>
-      <button class="btn btn-primary" @click="openCreateModal">
+      <button v-if="authStore.isTeacher" class="btn btn-primary" @click="openCreateModal">
         <Plus :size="18" />
         <span>Создать пробник</span>
       </button>
     </div>
 
+    <p v-if="pageError" class="text-danger" role="alert">{{ pageError }}</p>
     <!-- Фильтры -->
     <div class="toolbar card">
       <div class="filters-row">
@@ -258,8 +279,8 @@ const filteredTests = computed(() => {
     <div v-if="filteredTests.length === 0" class="empty-placeholder card">
       <FileCheck2 :size="48" class="empty-icon" />
       <h3>Пробников не найдено</h3>
-      <p>Создайте новый пробник для вашего класса</p>
-      <button class="btn btn-primary btn-sm" @click="openCreateModal" style="margin-top: 1rem;">
+      <p>{{ authStore.isTeacher ? 'Создайте новый пробник для вашего класса' : 'Здесь появятся пробники, опубликованные учителем для вашего класса.' }}</p>
+      <button v-if="authStore.isTeacher" class="btn btn-primary btn-sm" @click="openCreateModal" style="margin-top: 1rem;">
         <Plus :size="16" /> Создать пробник
       </button>
     </div>
@@ -270,15 +291,16 @@ const filteredTests = computed(() => {
           <div class="badges-row">
             <span class="badge badge-primary">{{ getClassName(test.classId) }}</span>
             <span class="badge badge-gray">{{ subjectLabel(test.subject) }}</span>
-            <span v-if="hasResults(test.id)" class="badge badge-success">
+            <span class="badge badge-gray">{{ test.status === 'draft' ? 'Черновик — ученикам не виден' : test.status === 'completed' ? 'Завершён' : 'Опубликован для учеников' }}</span>
+            <span v-if="authStore.isTeacher && hasResults(test.id)" class="badge badge-success">
               <CheckCircle2 :size="13" /> Заполнен ({{ getFilledCount(test) }})
             </span>
-            <span v-else class="badge badge-warning">
+            <span v-else-if="authStore.isTeacher" class="badge badge-warning">
               <Clock :size="13" /> Не заполнен
             </span>
           </div>
 
-          <div class="test-header-actions">
+          <div v-if="authStore.isTeacher" class="test-header-actions">
             <button class="btn btn-secondary btn-icon" @click="openEditModal(test)" title="Редактировать">
               <Edit2 :size="15" />
             </button>
@@ -306,11 +328,15 @@ const filteredTests = computed(() => {
         </div>
 
         <div class="test-card-footer">
+          <button v-if="authStore.isTeacher && test.status === 'draft'" class="btn btn-primary" :disabled="publishingId === test.id" @click="publishTest(test)">
+            {{ publishingId === test.id ? 'Публикуем…' : 'Опубликовать для учеников' }}
+          </button>
           <router-link :to="`/mock-tests/${test.id}/results`" class="btn btn-primary" style="flex: 1;">
-            <span>{{ hasResults(test.id) ? 'Редактировать ведомость' : 'Ввести баллы' }}</span>
+            <span>{{ authStore.isStudent ? (test.status === 'completed' ? 'Мои результаты' : 'Ввести мои баллы') : hasResults(test.id) ? 'Редактировать ведомость' : 'Ввести баллы' }}</span>
             <ArrowRight :size="16" />
           </router-link>
           <router-link
+            v-if="authStore.isTeacher"
             :to="`/analytics?classId=${test.classId}&testId=${test.id}`"
             class="btn btn-secondary"
             title="Открыть аналитику пробника"

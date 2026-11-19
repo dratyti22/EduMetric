@@ -48,13 +48,13 @@ const router = createRouter({
       path: '/analytics',
       name: 'analytics',
       component: AnalyticsView,
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresTeacher: true },
     },
     {
       path: '/history',
       name: 'history',
       component: HistoryView,
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresTeacher: true },
     },
     {
       path: '/profile',
@@ -77,6 +77,8 @@ router.beforeEach((to, from, next) => {
 
   if (requiresAuth && !authStore.isAuthenticated) {
     next({ name: 'login' });
+  } else if (to.meta.requiresTeacher && !authStore.isTeacher) {
+    next({ name: 'dashboard' });
   } else if (to.name === 'login' && authStore.isAuthenticated) {
     next({ name: 'dashboard' });
   } else {

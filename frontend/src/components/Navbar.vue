@@ -18,13 +18,13 @@ const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
-const navItems = [
+const navItems = computed(() => [
   { path: '/', label: 'Главная', icon: LayoutDashboard },
   { path: '/classes', label: 'Классы', icon: Users },
   { path: '/mock-tests', label: 'Пробники', icon: FileCheck2 },
   { path: '/analytics', label: 'Аналитика', icon: BarChart3 },
   { path: '/history', label: 'История', icon: History },
-];
+].filter((item) => authStore.isTeacher || !['/analytics', '/history'].includes(item.path)));
 
 const currentPath = computed(() => route.path);
 

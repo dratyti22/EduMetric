@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useClassesStore } from '../stores/classes';
 import { useMockTestsStore } from '../stores/mockTests';
 import { useResultsStore } from '../stores/results';
+import { subjectLabel } from '../utils/subjects';
 import type { Student } from '../types';
 import {
   History,
@@ -17,6 +18,7 @@ import {
 const classesStore = useClassesStore();
 const mockTestsStore = useMockTestsStore();
 const resultsStore = useResultsStore();
+const pageError = ref('');
 
 type ViewMode = 'classes' | 'students';
 const currentTab = ref<ViewMode>('classes');
@@ -29,14 +31,13 @@ const selectedStudentId = ref<string>('');
 const expandedTestIds = ref<Record<string, boolean>>({});
 
 onMounted(async () => {
-  if (!classesStore.loaded) await classesStore.fetchClasses();
-  if (!mockTestsStore.loaded) await mockTestsStore.fetchExams();
+  try {
+  await Promise.all([classesStore.fetchClasses(), mockTestsStore.fetchExams()]);
   if (classesStore.classes.length > 0 && classesStore.classes[0]) {
     selectedClassId.value = classesStore.classes[0].id;
   }
-  if (selectedClassId.value) {
-    await classesStore.fetchStudents(selectedClassId.value);
-    await resultsStore.fetchDynamics(selectedClassId.value);
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить историю';
   }
 });
 
@@ -49,16 +50,31 @@ const classStudents = computed<Student[]>(() => {
 // При изменении класса сбрасываем / выбираем первого ученика
 watch(
   () => selectedClassId.value,
-  async () => {
+  async (classId) => {
+    if (!classId) return;
+    pageError.value = '';
+    try {
+    await Promise.all([
+      classesStore.fetchStudents(classId),
+      ...mockTestsStore.getTestsByClass(classId).map((test) => resultsStore.fetchAnalytics(test.id, test.passingScoreSecondary)),
+    ]);
     if (classStudents.value.length > 0 && classStudents.value[0]) {
       selectedStudentId.value = classStudents.value[0].id;
-      await resultsStore.fetchStudentHistory(selectedStudentId.value);
     } else {
       selectedStudentId.value = '';
+    }
+    } catch (error) {
+      pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить историю класса';
     }
   },
   { immediate: true }
 );
+
+watch(selectedStudentId, async (id) => {
+  if (!id) return;
+  try { await resultsStore.fetchStudentHistory(id); }
+  catch (error) { pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить историю ученика'; }
+});
 
 // Текущий выбранный класс
 const currentClass = computed(() => classesStore.getClassById(selectedClassId.value));
@@ -126,6 +142,7 @@ function toggleExpand(testId: string) {
 
 <template>
   <div class="history-view">
+    <p v-if="pageError" class="text-danger" role="alert">{{ pageError }}</p>
     <div class="page-header">
       <div>
         <h1 class="page-title">История пробников</h1>
@@ -161,7 +178,7 @@ function toggleExpand(testId: string) {
           <select v-model="selectedClassId" class="form-select select-field">
             <option v-if="classesStore.classes.length === 0" value="">Нет добавленных классов</option>
             <option v-for="cls in classesStore.classes" :key="cls.id" :value="cls.id">
-              {{ cls.number }} «{{ cls.letter }}» ({{ cls.subject }})
+              {{ cls.name }} ({{ subjectLabel(cls.subject) }})
             </option>
           </select>
         </div>
@@ -208,7 +225,7 @@ function toggleExpand(testId: string) {
                 </td>
                 <td>
                   <strong>{{ row.test.title }}</strong>
-                  <div class="sub-info">{{ row.test.subject }} · {{ row.test.tasks.length }} заданий</div>
+                  <div class="sub-info">{{ subjectLabel(row.test.subject) }} · {{ row.test.tasks.length }} заданий</div>
                 </td>
                 <td>
                   <span class="badge badge-gray">{{ row.attendedCount }} из {{ row.totalCount }}</span>

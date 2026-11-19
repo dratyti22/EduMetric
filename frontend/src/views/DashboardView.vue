@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useClassesStore } from '../stores/classes';
 import { useMockTestsStore } from '../stores/mockTests';
 import { useResultsStore } from '../stores/results';
+import { subjectLabel } from '../utils/subjects';
 import {
   Users,
   FileCheck2,
@@ -21,14 +22,40 @@ const authStore = useAuthStore();
 const classesStore = useClassesStore();
 const mockTestsStore = useMockTestsStore();
 const resultsStore = useResultsStore();
+const resultsLoading = ref(true);
+const resultsError = ref('');
+
+onMounted(async () => {
+  try {
+    await Promise.all([
+      mockTestsStore.fetchExams(),
+      authStore.isStudent ? classesStore.fetchMyClasses() : classesStore.fetchClasses(),
+    ]);
+    if (authStore.isStudent) {
+      await Promise.all(mockTestsStore.mockTests.map((test) => resultsStore.fetchMyResult(test.id)));
+    }
+  } catch {
+    resultsError.value = 'Не удалось обновить данные. Обновите страницу, чтобы повторить загрузку.';
+  } finally {
+    resultsLoading.value = false;
+  }
+});
 
 const classesCount = computed(() => classesStore.classes.length);
-const studentsCount = computed(() => classesStore.students.length);
+const studentsCount = computed(() => classesStore.classes.reduce((sum, cls) => sum + (cls.students_count ?? 0), 0));
 const testsCount = computed(() => mockTestsStore.mockTests.length);
 
 const userTestIds = computed(() => new Set(mockTestsStore.mockTests.map((t) => t.id)));
 
 const avgScoreAll = computed(() => {
+  if (authStore.isStudent) {
+    const scores = mockTestsStore.mockTests
+      .map((test) => resultsStore.myResultByExam[test.id])
+      .filter((result) => result && Object.keys(result.scores_by_number).length > 0)
+      .map((result) => result!.summary.secondary_score)
+      .filter((score): score is number => score !== null);
+    return scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length * 10) / 10 : 0;
+  }
   let totalSecondary = 0;
   let count = 0;
   for (const sheet of resultsStore.resultSheets) {
@@ -54,17 +81,22 @@ function getClassName(classId: string) {
 }
 
 function getStudentsCountInClass(classId: string) {
-  return classesStore.getStudentsByClass(classId).length;
+  return classesStore.getClassById(classId)?.students_count ?? classesStore.getStudentsByClass(classId).length;
 }
 
 function hasResults(testId: string) {
+  if (authStore.isStudent) {
+    const result = resultsStore.myResultByExam[testId];
+    return !!result && Object.keys(result.scores_by_number).length > 0;
+  }
   const sheet = resultsStore.resultSheets.find((s) => s.mockTestId === testId);
-  return sheet && Object.keys(sheet.studentScores).length > 0;
+  return sheet && Object.values(sheet.studentScores).some((student) => Object.keys(student.scores).length > 0);
 }
 </script>
 
 <template>
   <div class="dashboard-page">
+    <p v-if="resultsError" class="text-danger" role="alert">{{ resultsError }}</p>
     <div class="welcome-banner card">
       <div class="welcome-content">
         <div class="welcome-badge">
@@ -73,19 +105,19 @@ function hasResults(testId: string) {
         </div>
         <h1 class="welcome-title">Здравствуйте, {{ authStore.userFullName || 'Учитель' }}!</h1>
         <p class="welcome-subtitle">
-          Управляйте классами, вносите баллы за пробные экзамены ЕГЭ/ОГЭ, отслеживайте динамику и анализируйте результаты учеников.
+          {{ authStore.isTeacher ? 'Управляйте классами, вносите баллы за пробные экзамены ЕГЭ/ОГЭ, отслеживайте динамику и анализируйте результаты учеников.' : 'Просматривайте свои классы, открывайте назначенные пробники и сохраняйте свои баллы.' }}
         </p>
 
         <div class="quick-actions">
           <router-link to="/classes" class="btn btn-primary">
             <PlusCircle :size="18" />
-            <span>Управление классами</span>
+            <span>{{ authStore.isTeacher ? 'Управление классами' : 'Мои классы' }}</span>
           </router-link>
           <router-link to="/mock-tests" class="btn btn-secondary">
             <FileCheck2 :size="18" />
-            <span>Назначить пробник</span>
+            <span>{{ authStore.isTeacher ? 'Назначить пробник' : 'Мои пробники' }}</span>
           </router-link>
-          <router-link to="/analytics" class="btn btn-secondary">
+          <router-link v-if="authStore.isTeacher" to="/analytics" class="btn btn-secondary">
             <BarChart3 :size="18" />
             <span>Сводная аналитика</span>
           </router-link>
@@ -97,7 +129,7 @@ function hasResults(testId: string) {
     <div class="stats-row">
       <div class="stat-box">
         <div class="stat-header">
-          <span class="stat-title">Классы под кураторством</span>
+          <span class="stat-title">{{ authStore.isTeacher ? 'Классы под кураторством' : 'Мои классы' }}</span>
           <Users class="stat-icon" :size="20" />
         </div>
         <span class="stat-value">{{ classesCount }}</span>
@@ -155,8 +187,10 @@ function hasResults(testId: string) {
             <div class="test-item-main">
               <div class="test-badge-row">
                 <span class="badge badge-primary">{{ getClassName(test.classId) }}</span>
-                <span class="badge badge-gray">{{ test.subject }}</span>
-                <span v-if="hasResults(test.id)" class="badge badge-success">Результаты внесены</span>
+                <span class="badge badge-gray">{{ subjectLabel(test.subject) }}</span>
+                <span v-if="authStore.isStudent && resultsLoading" class="badge badge-gray">Загрузка результатов…</span>
+                <span v-else-if="authStore.isStudent && resultsError" class="badge badge-gray">Статус не загружен</span>
+                <span v-else-if="hasResults(test.id)" class="badge badge-success">Результаты внесены</span>
                 <span v-else class="badge badge-warning">Ожидает ввода баллов</span>
               </div>
               <h3 class="test-item-title">{{ test.title }}</h3>
@@ -169,9 +203,9 @@ function hasResults(testId: string) {
 
             <div class="test-item-actions">
               <router-link :to="`/mock-tests/${test.id}/results`" class="btn btn-secondary btn-sm">
-                Ввести баллы
+                {{ hasResults(test.id) ? (authStore.isStudent ? 'Мои результаты' : 'Открыть ведомость') : 'Ввести баллы' }}
               </router-link>
-              <router-link :to="`/analytics?classId=${test.classId}&testId=${test.id}`" class="btn btn-primary btn-sm">
+              <router-link v-if="authStore.isTeacher" :to="`/analytics?classId=${test.classId}&testId=${test.id}`" class="btn btn-primary btn-sm">
                 Аналитика
               </router-link>
             </div>
@@ -201,7 +235,7 @@ function hasResults(testId: string) {
               {{ cls.number }}{{ cls.letter }}
             </div>
             <div class="class-compact-details">
-              <span class="class-compact-subject">{{ cls.subject }}</span>
+              <span class="class-compact-subject">{{ subjectLabel(cls.subject) }}</span>
               <span class="class-compact-count">
                 <Users :size="13" /> {{ getStudentsCountInClass(cls.id) }} учеников
               </span>

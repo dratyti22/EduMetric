@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
@@ -226,6 +228,11 @@ class MyExamResultView(APIView):
 
     def get(self, request, pk):
         exam = get_object_or_404(student_exam_queryset(request.user), pk=pk)
+        if exam.status == Exam.Status.IN_PROGRESS:
+            with transaction.atomic():
+                exam = get_object_or_404(Exam.objects.select_for_update(), pk=exam.pk)
+                if exam.status == Exam.Status.IN_PROGRESS:
+                    sync_exam_students(exam)
         student = get_linked_student(request.user, exam.school_class_id)
         result = get_object_or_404(
             StudentResult.objects.select_related(
@@ -245,7 +252,9 @@ class MyExamScoreUpdateView(APIView):
     def patch(self, request, pk):
         with transaction.atomic():
             exam = get_object_or_404(
-                student_exam_queryset(request.user).select_for_update(),
+                Exam.objects.filter(
+                    pk__in=student_exam_queryset(request.user).values("pk")
+                ).select_for_update(),
                 pk=pk,
             )
             student = get_linked_student(request.user, exam.school_class_id)
@@ -286,7 +295,7 @@ class ExamAnalyticsView(APIView):
         threshold = int(threshold_param) if threshold_param is not None else None
 
         data = get_exam_analytics(exam, threshold=threshold)
-        serializer = ExamAnalyticsSerializer(data.dict)
+        serializer = ExamAnalyticsSerializer(asdict(data))
         return Response(serializer.data)
 
 

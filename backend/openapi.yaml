@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: EduMetric API
-  version: 1.4.0
+  version: 1.4.1
   description: >
     API для веб-приложения EduMetric. Авторизация с ролями, профиль, классы с кодом
     вступления, подтверждение привязки аккаунта ученика и пробники. Учитель публикует
@@ -220,6 +220,27 @@ components:
         students_count:
           type: integer
           readOnly: true
+          example: 12
+        created_at:
+          type: string
+          format: date-time
+    StudentClass:
+      type: object
+      required: [id, name, subject, students_count, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: '11А'
+        subject:
+          type: string
+          enum: [math_profile, math_base, russian, informatics, physics, social, biology, chemistry, history, english]
+        students_count:
+          type: integer
+          readOnly: true
+          description: Общее число учеников в классе, включая ручные карточки.
           example: 12
         created_at:
           type: string
@@ -476,6 +497,24 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /classes/mine/:
+    get:
+      summary: Классы текущего ученика
+      description: Только для роли student. Код вступления и персональные данные других учеников не возвращаются.
+      tags: [Classes]
+      responses:
+        '200':
+          description: Классы с общим числом участников
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentClass'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Доступ разрешён только ученикам
   /classes/{id}/:
     parameters:
       - name: id

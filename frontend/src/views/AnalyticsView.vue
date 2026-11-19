@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { useClassesStore } from '../stores/classes';
 import { useMockTestsStore } from '../stores/mockTests';
 import { useResultsStore } from '../stores/results';
+import { subjectLabel } from '../utils/subjects';
 import type { ClassAnalyticsSummary, MockTest } from '../types';
 import {
   BarChart3,
@@ -22,8 +23,12 @@ const resultsStore = useResultsStore();
 const selectedClassId = ref<string>('');
 const selectedTestId = ref<string>('');
 const threshold = ref<number>(36);
+const pageError = ref('');
+const loading = ref(true);
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+  await Promise.all([classesStore.fetchClasses(), mockTestsStore.fetchExams()]);
   if (route.query.classId) {
     selectedClassId.value = String(route.query.classId);
   } else if (classesStore.classes.length > 0 && classesStore.classes[0]) {
@@ -33,7 +38,10 @@ onMounted(() => {
   if (route.query.testId) {
     selectedTestId.value = String(route.query.testId);
   }
-  if (selectedTestId.value) resultsStore.fetchAnalytics(selectedTestId.value, threshold.value);
+  if (!selectedTestId.value) selectedTestId.value = classTests.value[0]?.id || '';
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить данные';
+  } finally { loading.value = false; }
 });
 
 // Доступные пробники выбранного класса
@@ -68,10 +76,32 @@ watch(
       if (t && t.passingScoreSecondary) {
         threshold.value = t.passingScoreSecondary;
       }
-      resultsStore.fetchAnalytics(newTestId, threshold.value);
     }
   }
 );
+
+let analyticsRequest = 0;
+watch([selectedTestId, threshold], async ([id, value]) => {
+  const request = ++analyticsRequest;
+  if (!id) return;
+  pageError.value = '';
+  try {
+    const summary = await resultsStore.fetchAnalytics(id, value);
+    if (request !== analyticsRequest) return;
+    resultsStore.analyticsByExam[id] = summary;
+  } catch (error) {
+    if (request === analyticsRequest) pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить аналитику';
+  }
+});
+
+watch(selectedClassId, async (id) => {
+  if (!id) return;
+  try {
+    await resultsStore.fetchDynamics(id);
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить динамику';
+  }
+});
 
 const currentClass = computed(() => classesStore.getClassById(selectedClassId.value));
 const currentTest = computed(() => mockTestsStore.getMockTestById(selectedTestId.value));
@@ -94,10 +124,10 @@ const classDynamics = computed(() => {
       testId: t.id,
       title: t.title,
       date: t.date,
-      avgPrimary: summary?.avgPrimary || 0,
-      avgSecondary: summary?.avgSecondary || 0,
+      avgPrimary: resultsStore.dynamicsByClass[selectedClassId.value]?.find((item) => item.exam_id === t.id)?.avg_primary ?? summary?.avgPrimary ?? 0,
+      avgSecondary: resultsStore.dynamicsByClass[selectedClassId.value]?.find((item) => item.exam_id === t.id)?.avg_secondary ?? summary?.avgSecondary ?? 0,
       maxSecondary: summary?.maxSecondary || 0,
-      attended: summary?.attendedStudents || 0,
+      attended: resultsStore.dynamicsByClass[selectedClassId.value]?.find((item) => item.exam_id === t.id)?.attended_students ?? summary?.attendedStudents ?? 0,
     };
   });
 });
@@ -105,6 +135,8 @@ const classDynamics = computed(() => {
 
 <template>
   <div class="analytics-view">
+    <p v-if="pageError" class="text-danger" role="alert">{{ pageError }}</p>
+    <p v-if="loading">Загрузка…</p>
     <div class="page-header">
       <div>
         <h1 class="page-title">Раздел «Аналитика»</h1>
@@ -123,7 +155,7 @@ const classDynamics = computed(() => {
           <select v-model="selectedClassId" class="form-select select-field">
             <option v-if="classesStore.classes.length === 0" value="">Нет добавленных классов</option>
             <option v-for="cls in classesStore.classes" :key="cls.id" :value="cls.id">
-              {{ cls.number }} «{{ cls.letter }}» ({{ cls.subject }})
+              {{ cls.name }} ({{ subjectLabel(cls.subject) }})
             </option>
           </select>
         </div>

@@ -24,9 +24,14 @@ class SchoolClassSerializer(serializers.ModelSerializer):
 class StudentClassSerializer(serializers.ModelSerializer):
     """Класс глазами ученика: без кода вступления."""
 
+    students_count = serializers.SerializerMethodField()
+
+    def get_students_count(self, obj):
+        return obj.students.count()
+
     class Meta:
         model = SchoolClass
-        fields = ("id", "name", "subject", "created_at")
+        fields = ("id", "name", "subject", "students_count", "created_at")
 
 
 class StudentSerializer(serializers.ModelSerializer):

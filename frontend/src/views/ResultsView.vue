@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { useMockTestsStore } from '../stores/mockTests';
 import { useClassesStore } from '../stores/classes';
 import { useResultsStore } from '../stores/results';
+import { useAuthStore } from '../stores/auth';
 import { convertPrimaryToSecondary } from '../utils/scales';
 import { subjectLabel } from '../utils/subjects';
 import type { MockTest, Student } from '../types';
@@ -23,22 +24,41 @@ const route = useRoute();
 const mockTestsStore = useMockTestsStore();
 const classesStore = useClassesStore();
 const resultsStore = useResultsStore();
+const authStore = useAuthStore();
+const pageError = ref('');
+const loading = ref(true);
 
 const testId = computed(() => route.params.id as string);
 const test = computed<MockTest | undefined>(() => mockTestsStore.getMockTestById(testId.value));
 const schoolClass = computed(() => (test.value ? classesStore.getClassById(test.value.classId) : undefined));
-const students = computed<Student[]>(() => (test.value ? classesStore.getStudentsByClass(test.value.classId) : []));
+const students = computed(() => {
+  if (authStore.isStudent) {
+    const result = resultsStore.myResultByExam[testId.value];
+    return result ? [{ id: result.student_id, fullName: result.student_name }] : [];
+  }
+  return test.value ? classesStore.getStudentsByClass(test.value.classId) : [];
+});
 
 // studentId -> taskNumber -> score
 const matrixScores = ref<Record<string, Record<number, number | ''>>>({});
 const saveSuccessMessage = ref(false);
 
 onMounted(async () => {
-  if (test.value) {
-    await classesStore.fetchStudents(test.value.classId);
-    await resultsStore.fetchResults(test.value.id);
+  try {
+    await mockTestsStore.fetchExams();
+    if (test.value) {
+      if (authStore.isStudent) await resultsStore.fetchMyResult(test.value.id);
+      else {
+        await classesStore.fetchStudents(test.value.classId);
+        await resultsStore.fetchResults(test.value.id);
+      }
+    }
+    loadExistingResults();
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : 'Не удалось загрузить результаты';
+  } finally {
+    loading.value = false;
   }
-  loadExistingResults();
 });
 
 function loadExistingResults() {
@@ -48,7 +68,9 @@ function loadExistingResults() {
   const initialMatrix: Record<string, Record<number, number | ''>> = {};
   for (const std of students.value) {
     const studentRow: Record<number, number | ''> = {};
-    const existingStd = sheet.studentScores[std.id];
+    const existingStd = authStore.isStudent
+      ? { scores: resultsStore.myResultByExam[testId.value]?.scores_by_number || {} }
+      : sheet.studentScores[std.id];
 
     test.value.tasks.forEach((t) => {
       if (existingStd && existingStd.scores && existingStd.scores[t.taskNumber] !== undefined) {
@@ -70,6 +92,7 @@ function getCellValue(studentId: string, taskNumber: number): number | '' {
 }
 
 function setCellValue(studentId: string, taskNumber: number, value: number | '') {
+  if (!canEditStudent(studentId)) return;
   if (!matrixScores.value[studentId]) {
     matrixScores.value[studentId] = {};
   }
@@ -77,6 +100,15 @@ function setCellValue(studentId: string, taskNumber: number, value: number | '')
   if (row) {
     row[taskNumber] = value;
   }
+}
+
+function canEditStudent(studentId: string): boolean {
+  if (test.value?.status === 'completed') return false;
+  if (authStore.isStudent) {
+    return resultsStore.myResultByExam[testId.value]?.student_id === studentId;
+  }
+  const student = classesStore.getStudentsByClass(test.value?.classId || '').find((item) => item.id === studentId);
+  return authStore.isTeacher && student?.is_linked === false;
 }
 
 // Проверка превышения максимума задания
@@ -91,6 +123,7 @@ function isScoreExceeded(taskNumber: number, val: number | '' | undefined): bool
 function hasAnyErrors(): boolean {
   if (!test.value) return false;
   for (const stdId of Object.keys(matrixScores.value)) {
+    if (!canEditStudent(stdId)) continue;
     const stdRow = matrixScores.value[stdId];
     if (stdRow) {
       for (const task of test.value.tasks) {
@@ -163,11 +196,28 @@ const maxSecondaryInSheet = computed(() => {
 });
 
 // Сохранение ведомости результатов
-function saveResults() {
+async function saveResults() {
   if (!test.value) return;
 
   if (hasAnyErrors()) {
     alert('Пожалуйста, исправьте баллы, превышающие максимум за задание (подсвечены красным).');
+    return;
+  }
+
+  if (authStore.isStudent) {
+    const result = resultsStore.myResultByExam[testId.value];
+    if (!result) return;
+    const row = matrixScores.value[result.student_id] || {};
+    if (test.value.tasks.some((task) => row[task.taskNumber] === '' || row[task.taskNumber] === undefined)) {
+      alert('Заполните все задания. Если задание не решено, укажите 0.');
+      return;
+    }
+    try {
+      await resultsStore.saveMyScores(testId.value, Object.fromEntries(Object.entries(row).map(([number, score]) => [number, Number(score)])));
+      saveSuccessMessage.value = true;
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Не удалось сохранить результаты');
+    }
     return;
   }
 
@@ -179,6 +229,7 @@ function saveResults() {
   };
 
   for (const std of students.value) {
+    if (!canEditStudent(std.id)) continue;
     if (isStudentAttended(std.id)) {
       const row = matrixScores.value[std.id] || {};
       const cleanScores: Record<number, number> = {};
@@ -208,6 +259,7 @@ function saveResults() {
 function fillDemoResults() {
   if (!test.value) return;
   for (const std of students.value) {
+    if (!canEditStudent(std.id)) continue;
     if (!matrixScores.value[std.id]) matrixScores.value[std.id] = {};
     const row = matrixScores.value[std.id];
     if (row) {
@@ -229,6 +281,7 @@ function clearMatrix() {
   if (confirm('Очистить все введенные баллы в таблице?')) {
     if (!test.value) return;
     for (const std of students.value) {
+      if (!canEditStudent(std.id)) continue;
       if (!matrixScores.value[std.id]) matrixScores.value[std.id] = {};
       const row = matrixScores.value[std.id];
       if (row) {
@@ -242,7 +295,9 @@ function clearMatrix() {
 </script>
 
 <template>
-  <div v-if="!test" class="card empty-placeholder">
+  <p v-if="pageError" class="text-danger" role="alert">{{ pageError }}</p>
+  <div v-if="loading" class="card">Загрузка результатов…</div>
+  <div v-else-if="!test" class="card empty-placeholder">
     <AlertCircle :size="48" class="empty-icon" />
     <h2>Пробник не найден</h2>
     <p>Возможно, он был удален или перенесен.</p>
@@ -273,7 +328,7 @@ function clearMatrix() {
         </p>
       </div>
 
-      <div class="header-buttons">
+      <div v-if="test.status !== 'completed'" class="header-buttons">
         <button class="btn btn-secondary btn-sm" @click="fillDemoResults" title="Быстро заполнить случайными баллами">
           <Sparkles :size="16" />
           <span>Автозаполнение</span>
@@ -335,6 +390,7 @@ function clearMatrix() {
           Порог сдачи: <strong>{{ test.passingScoreSecondary }} вт. б.</strong>
         </span>
         <router-link
+          v-if="authStore.isTeacher"
           :to="`/analytics?classId=${test.classId}&testId=${test.id}`"
           class="link-analytics ml-auto"
         >
@@ -377,6 +433,7 @@ function clearMatrix() {
               <td class="col-num sticky-col-1">{{ idx + 1 }}</td>
               <td class="col-name sticky-col-2">
                 <span class="student-fullname">{{ student.fullName }}</span>
+                <small v-if="authStore.isTeacher && !canEditStudent(student.id) && test.status !== 'completed'"> — заполняет ученик</small>
               </td>
 
               <!-- Поля ввода баллов за задания -->
@@ -392,6 +449,7 @@ function clearMatrix() {
                   min="0"
                   :max="task.maxScore"
                   class="score-input"
+                  :disabled="!canEditStudent(student.id)"
                   :class="{ 'input-error': isScoreExceeded(task.taskNumber, getCellValue(student.id, task.taskNumber)) }"
                   placeholder="—"
                   @input="setCellValue(student.id, task.taskNumber, ($event.target as HTMLInputElement).value === '' ? '' : Number(($event.target as HTMLInputElement).value))"
