@@ -5,6 +5,44 @@
 `docker-compose.yaml` остаётся конфигурацией разработки. Для сервера используется
 **только `compose.production.yaml`**, без объединения с dev-файлом.
 
+## Временно без домена: HTTP по IP
+
+Можно запустить по публичному IP без ожидания DNS и выпуска сертификата.
+**HTTP не шифрует пароли, токены и персональные данные. Используйте только для
+временной проверки, желательно с ограничением доступа вашим IP в firewall.**
+
+После установки Docker и загрузки проекта вместо доменного примера:
+
+```bash
+cp .env.ip.example .env.production
+chmod 600 .env.production
+nano .env.production
+```
+
+Если `.env.production` уже существует, не перезаписывайте его: измените только
+настройки адреса/HTTP из `.env.ip.example`, сохранив пароль существующей БД и секрет.
+
+Замените `203.0.113.10` своим публичным IP во всех четырёх строках адресов.
+`DOMAIN` здесь **с `http://`**, `ALLOWED_HOSTS` — только IP.
+Сгенерируйте SECRET_KEY и пароль новой БД командой `openssl rand -hex 48`
+(каждый отдельно). Оставьте `DEBUG=0`. Затем:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml up -d --build
+docker compose --env-file .env.production -f compose.production.yaml logs --tail=100 release backend web
+```
+
+Откройте **`http://ВАШ_IP`** (не HTTPS). Нужен открытый TCP-порт 80.
+Предупреждения `check --deploy` об отключённых HTTPS/secure cookies/HSTS ожидаемы
+в этом временном режиме; остальные ошибки необходимо устранить.
+Администратора и шаблоны создайте командами раздела 3.
+
+Когда появится домен, измените DOMAIN/ALLOWED_HOSTS/CORS/CSRF по доменному примеру,
+удалите четыре строки `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`,
+`CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS` (вернутся безопасные значения),
+настройте DNS и откройте TCP 443. Повторите `up -d --build`.
+Пароль БД и SECRET_KEY при этом сохраняйте.
+
 ## 1. Подготовить сервер
 
 - VPS с Ubuntu 24.04 LTS, ориентир: 2 CPU, 2–4 ГБ RAM, 20+ ГБ диска.
