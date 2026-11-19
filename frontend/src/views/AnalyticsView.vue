@@ -33,6 +33,7 @@ onMounted(() => {
   if (route.query.testId) {
     selectedTestId.value = String(route.query.testId);
   }
+  if (selectedTestId.value) resultsStore.fetchAnalytics(selectedTestId.value, threshold.value);
 });
 
 // Доступные пробники выбранного класса
@@ -67,6 +68,7 @@ watch(
       if (t && t.passingScoreSecondary) {
         threshold.value = t.passingScoreSecondary;
       }
+      resultsStore.fetchAnalytics(newTestId, threshold.value);
     }
   }
 );
@@ -77,7 +79,7 @@ const currentTest = computed(() => mockTestsStore.getMockTestById(selectedTestId
 // Аналитический отчет по выбранному классу и пробнику
 const analytics = computed<ClassAnalyticsSummary | null>(() => {
   if (!selectedClassId.value) return null;
-  return resultsStore.getClassAnalytics(selectedClassId.value, selectedTestId.value, threshold.value);
+  return resultsStore.getClassAnalytics(selectedClassId.value, selectedTestId.value);
 });
 
 // Динамика между всеми пробниками выбранного класса

@@ -1,3 +1,5 @@
+// Legacy demo-data module retained for reference; runtime data comes from the API stores.
+// @ts-nocheck
 import type { SchoolClass, Student, MockTest, MockTestResultSheet, User } from '../types';
 import { getDefaultTasksForSubject, calculateMaxPrimary, convertPrimaryToSecondary } from './scales';
 

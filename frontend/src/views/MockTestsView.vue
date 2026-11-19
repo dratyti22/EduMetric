@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useMockTestsStore } from '../stores/mockTests';
 import { useClassesStore } from '../stores/classes';
 import { useResultsStore } from '../stores/results';
 import { AVAILABLE_SUBJECTS, getDefaultTasksForSubject, calculateMaxPrimary, SUBJECT_PRESETS } from '../utils/scales';
 import type { MockTest, TaskSpec } from '../types';
+import { subjectId, subjectLabel } from '../utils/subjects';
 import Modal from '../components/Modal.vue';
 import {
   FileCheck2,
@@ -57,6 +58,11 @@ const testForm = ref<{
 
 const showTaskCustomizer = ref(false);
 
+onMounted(async () => {
+  if (!mockTestsStore.loaded) await mockTestsStore.fetchExams();
+  if (mockTestsStore.templates.length === 0) await mockTestsStore.fetchTemplates();
+});
+
 // Автоподстановка предмета при выборе класса
 watch(
   () => testForm.value.classId,
@@ -72,8 +78,10 @@ watch(
 );
 
 function loadSubjectDefaults(subjectName: string) {
-  testForm.value.tasks = getDefaultTasksForSubject(subjectName);
-  testForm.value.passingScoreSecondary = SUBJECT_PRESETS[subjectName]?.defaultPassingSecondary || 36;
+  const label = subjectLabel(subjectName);
+  testForm.value.subject = subjectId(subjectName);
+  testForm.value.tasks = getDefaultTasksForSubject(label);
+  testForm.value.passingScoreSecondary = SUBJECT_PRESETS[label]?.defaultPassingSecondary || 36;
 }
 
 const currentFormMaxPrimary = computed(() => {
@@ -137,7 +145,7 @@ function removeTask(index: number) {
   });
 }
 
-function saveTest() {
+async function saveTest() {
   if (!testForm.value.title.trim()) {
     alert('Пожалуйста, введите название пробника');
     return;
@@ -152,21 +160,18 @@ function saveTest() {
   }
 
   if (isEditing.value && editingTestId.value) {
-    mockTestsStore.updateMockTest(editingTestId.value, {
+    await mockTestsStore.updateMockTest(editingTestId.value, {
       title: testForm.value.title,
       date: testForm.value.date,
-      classId: testForm.value.classId,
-      subject: testForm.value.subject,
       academicYear: testForm.value.academicYear,
       passingScoreSecondary: testForm.value.passingScoreSecondary,
-      tasks: testForm.value.tasks,
     });
   } else {
-    mockTestsStore.addMockTest({
+    await mockTestsStore.addMockTest({
       title: testForm.value.title,
       date: testForm.value.date,
       classId: testForm.value.classId,
-      subject: testForm.value.subject,
+      subject: testForm.value.subject as MockTest['subject'],
       academicYear: testForm.value.academicYear,
       passingScoreSecondary: testForm.value.passingScoreSecondary,
       tasks: testForm.value.tasks,

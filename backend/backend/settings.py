@@ -32,6 +32,12 @@ DEBUG = int(env("DEBUG", default=1))
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 
+CORS_ALLOWED_ORIGINS = env.list(
+    "CORS_ALLOWED_ORIGINS",
+    default=["http://localhost:5173", "http://127.0.0.1:5173"],
+)
+CORS_ALLOW_CREDENTIALS = True
+
 
 # Application definition
 
@@ -43,6 +49,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.postgres",
+    "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
     "user.apps.UserConfig",
@@ -52,6 +59,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

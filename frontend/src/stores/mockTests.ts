@@ -1,98 +1,166 @@
-import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
-import type { MockTest, TaskSpec } from '../types';
-import { StorageService } from '../utils/storage';
-import { calculateMaxPrimary, SUBJECT_PRESETS, getDefaultTasksForSubject } from '../utils/scales';
-import { useAuthStore } from './auth';
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import api, { apiErrorMessage } from '../api/client'
+import type { Exam, ExamStatus, ExamTemplate, SubjectId, TaskSpec } from '../types'
+import { useAuthStore } from './auth'
+import { subjectId } from '../utils/subjects'
+
+function normalizeExam(item: Omit<Exam, 'classId' | 'className' | 'academicYear' | 'passingScoreSecondary' | 'maxPrimaryScore' | 'createdAt'>): Exam {
+  return {
+    ...item,
+    tasks: item.tasks.map((task) => ({ ...task, taskNumber: task.number, maxScore: task.max_score })),
+    classId: item.school_class,
+    className: item.school_class_name,
+    academicYear: item.academic_year,
+    passingScoreSecondary: item.passing_score_secondary,
+    maxPrimaryScore: item.max_primary_score,
+    createdAt: item.created_at,
+  }
+}
 
 export const useMockTestsStore = defineStore('mockTests', () => {
-  const authStore = useAuthStore();
-  const allMockTests = ref<MockTest[]>(StorageService.getMockTests());
+  const exams = ref<Exam[]>([])
+  const templates = ref<ExamTemplate[]>([])
+  const loaded = ref(false)
 
-  // Пробники текущего авторизованного пользователя
-  const mockTests = computed(() => {
-    const currentUserId = authStore.user?.id;
-    if (!currentUserId) return [];
-    return allMockTests.value.filter(
-      (t) => t.userId === currentUserId || (!t.userId && currentUserId === 'usr-1')
-    );
-  });
+  const mockTests = computed(() => exams.value)
 
-  function syncTests() {
-    StorageService.saveMockTests(allMockTests.value);
+  async function fetchExams(classId?: string) {
+    const auth = useAuthStore()
+    const path = auth.isStudent ? '/exams/mine/' : '/exams/'
+    const { data } = await api.get<Omit<Exam, 'classId' | 'className' | 'academicYear' | 'passingScoreSecondary' | 'maxPrimaryScore' | 'createdAt'>[]>(path, {
+      params: classId ? { class_id: classId } : undefined,
+    })
+    exams.value = data.map(normalizeExam)
+    loaded.value = true
+    return data
   }
 
-  function addMockTest(data: {
-    title: string;
-    date: string;
-    classId: string;
-    subject: string;
-    academicYear?: string;
-    tasks?: TaskSpec[];
-    passingScoreSecondary?: number;
-  }): MockTest {
-    const tasks = data.tasks && data.tasks.length > 0 ? data.tasks : getDefaultTasksForSubject(data.subject);
-    const maxPrimary = calculateMaxPrimary(tasks);
-    const defaultPassing = SUBJECT_PRESETS[data.subject]?.defaultPassingSecondary || 36;
-
-    const newTest: MockTest = {
-      id: 'test-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-      userId: authStore.user?.id || 'usr-1',
-      title: data.title.trim(),
-      date: data.date,
-      classId: data.classId,
-      subject: data.subject,
-      academicYear: data.academicYear || '2025/2026',
-      tasks,
-      maxPrimaryScore: maxPrimary,
-      passingScoreSecondary: data.passingScoreSecondary ?? defaultPassing,
-      createdAt: new Date().toISOString(),
-    };
-
-    allMockTests.value.unshift(newTest);
-    syncTests();
-    return newTest;
+  async function fetchTemplates(subject?: SubjectId) {
+    const { data } = await api.get<ExamTemplate[]>('/exam-templates/', {
+      params: subject ? { subject } : undefined,
+    })
+    templates.value = data
+    return data
   }
 
-  function updateMockTest(id: string, data: Partial<Omit<MockTest, 'id' | 'createdAt'>>) {
-    const idx = allMockTests.value.findIndex((t) => t.id === id);
-    const current = allMockTests.value[idx];
-    if (idx !== -1 && current) {
-      const tasks = data.tasks ?? current.tasks;
-      const maxPrimary = calculateMaxPrimary(tasks);
-
-      allMockTests.value[idx] = {
-        ...current,
-        ...data,
-        tasks,
-        maxPrimaryScore: maxPrimary,
-      };
-      syncTests();
+  async function addMockTest(payload: {
+    title: string
+    date: string
+    classId: string
+    subject: SubjectId
+    academicYear?: string
+    tasks?: TaskSpec[]
+    passingScoreSecondary?: number
+    templateId?: string | null
+  }): Promise<Exam> {
+    try {
+      const body: Record<string, unknown> = {
+        title: payload.title.trim(),
+        date: payload.date,
+        school_class: payload.classId,
+        subject: subjectId(payload.subject),
+        academic_year: payload.academicYear,
+        passing_score_secondary: payload.passingScoreSecondary,
+      }
+      if (payload.templateId) {
+        body.template = payload.templateId
+      }
+      if (!payload.templateId && payload.tasks && payload.tasks.length > 0) {
+        body.tasks = payload.tasks.map((task) => ({
+          number: task.taskNumber,
+          max_score: task.maxScore,
+        }))
+        body.use_proportional_conversion = !payload.templateId
+      }
+      const { data } = await api.post<Parameters<typeof normalizeExam>[0]>('/exams/', body)
+      const exam = normalizeExam(data)
+      exams.value.unshift(exam)
+      return exam
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось создать пробник'))
     }
   }
 
-  function deleteMockTest(id: string) {
-    allMockTests.value = allMockTests.value.filter((t) => t.id !== id);
-    syncTests();
+  async function updateMockTest(
+    id: string,
+    payload: {
+      title?: string
+      date?: string
+      academicYear?: string
+      passingScoreSecondary?: number
+    },
+  ) {
+    try {
+      const { data } = await api.patch<Parameters<typeof normalizeExam>[0]>(`/exams/${id}/`, {
+        title: payload.title,
+        date: payload.date,
+        academic_year: payload.academicYear,
+        passing_score_secondary: payload.passingScoreSecondary,
+      })
+      const index = exams.value.findIndex((item) => item.id === id)
+      const exam = normalizeExam(data)
+      if (index !== -1) exams.value[index] = exam
+      return exam
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось обновить пробник'))
+    }
   }
 
-  function getMockTestById(id: string): MockTest | undefined {
-    return allMockTests.value.find((t) => t.id === id);
+  async function deleteMockTest(id: string) {
+    try {
+      await api.delete(`/exams/${id}/`)
+      exams.value = exams.value.filter((item) => item.id !== id)
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось удалить пробник'))
+    }
   }
 
-  function getTestsByClass(classId: string): MockTest[] {
-    return mockTests.value
-      .filter((t) => t.classId === classId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  async function publishExam(id: string) {
+    try {
+      const { data } = await api.post<{ id: string; status: ExamStatus }>(`/exams/${id}/publish/`)
+      const exam = exams.value.find((item) => item.id === id)
+      if (exam) exam.status = data.status
+      return data
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось опубликовать пробник'))
+    }
+  }
+
+  async function completeExam(id: string) {
+    try {
+      const { data } = await api.post<{ id: string; status: ExamStatus }>(`/exams/${id}/complete/`)
+      const exam = exams.value.find((item) => item.id === id)
+      if (exam) exam.status = data.status
+      return data
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось завершить пробник'))
+    }
+  }
+
+  function getMockTestById(id: string) {
+    return exams.value.find((item) => item.id === id)
+  }
+
+  function getTestsByClass(classId: string) {
+    return exams.value
+      .filter((item) => item.classId === classId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   }
 
   return {
+    exams,
     mockTests,
-    allMockTests,
+    templates,
+    loaded,
+    fetchExams,
+    fetchTemplates,
     addMockTest,
     updateMockTest,
     deleteMockTest,
+    publishExam,
+    completeExam,
     getMockTestById,
     getTestsByClass,
-  };
-});
+  }
+})

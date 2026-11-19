@@ -36,7 +36,7 @@ const form = ref({
   firstName: authStore.user?.firstName || '',
   middleName: authStore.user?.middleName || '',
   email: authStore.user?.email || '',
-  role: authStore.user?.role || 'Учитель',
+  role: authStore.user?.role || 'teacher',
   subject: authStore.user?.subject || '',
   school: authStore.user?.school || '',
   phone: authStore.user?.phone || '',
@@ -78,7 +78,7 @@ function startEditing() {
     firstName: authStore.user?.firstName || '',
     middleName: authStore.user?.middleName || '',
     email: authStore.user?.email || '',
-    role: authStore.user?.role || 'Учитель',
+    role: authStore.user?.role || 'teacher',
     subject: authStore.user?.subject || '',
     school: authStore.user?.school || '',
     phone: authStore.user?.phone || '',
@@ -89,15 +89,14 @@ function startEditing() {
   errorMessage.value = '';
 }
 
-function handleSaveProfile() {
+async function handleSaveProfile() {
   errorMessage.value = '';
   try {
-    authStore.updateProfile({
-      lastName: form.value.lastName,
-      firstName: form.value.firstName,
-      middleName: form.value.middleName,
+     await authStore.updateProfile({
+       last_name: form.value.lastName,
+       first_name: form.value.firstName,
+       middle_name: form.value.middleName,
       email: form.value.email,
-      role: form.value.role,
       subject: form.value.subject,
       school: form.value.school,
       phone: form.value.phone,
@@ -113,7 +112,7 @@ function handleSaveProfile() {
   }
 }
 
-function handleChangePassword() {
+async function handleChangePassword() {
   passError.value = '';
   passSuccess.value = false;
 
@@ -132,10 +131,7 @@ function handleChangePassword() {
 
   // Обновляем пароль в хранилище пользователя
   if (authStore.user) {
-    authStore.updateProfile({
-      ...authStore.user,
-      password: passForm.value.newPassword,
-    });
+     await authStore.changePassword(passForm.value.currentPassword, passForm.value.newPassword);
   }
 
   passSuccess.value = true;

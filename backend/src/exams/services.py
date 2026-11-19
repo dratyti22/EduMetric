@@ -369,7 +369,7 @@ def get_student_history(student_id, user) -> list[dict]:
         StudentResult.objects.filter(student=student)
         .select_related("exam", "exam__template")
         .prefetch_related("task_results__task")
-        .order_by("examdate", "examcreated_at")
+        .order_by("exam__date", "exam__created_at")
     )
 
     history = []

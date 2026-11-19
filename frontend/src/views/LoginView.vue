@@ -32,6 +32,7 @@ const regForm = ref<RegisterData>({
   first_name: '',
   last_name: '',
   middle_name: '',
+  role: 'teacher',
 });
 
 const errorMessage = ref('');
@@ -126,7 +127,7 @@ async function handleRegister() {
       <!-- Форма Входа -->
       <form v-if="activeTab === 'login'" @submit.prevent="handleLogin" class="auth-form">
         <div class="form-group">
-          <label class="form-label" for="login-email">Email или Логин</label>
+          <label class="form-label" for="login-email">Email</label>
           <div class="input-with-icon">
             <Mail :size="16" class="field-icon" />
             <input
@@ -134,7 +135,7 @@ async function handleRegister() {
               v-model="loginEmail"
               type="text"
               class="form-input with-icon"
-              placeholder="Введите ваш email или логин"
+              placeholder="ivanov@school.ru"
               required
               autocomplete="username"
             />
@@ -199,6 +200,14 @@ async function handleRegister() {
         </div>
 
         <div class="form-group">
+          <label class="form-label">Роль <span class="required">*</span></label>
+          <select v-model="regForm.role" class="form-select">
+            <option value="teacher">Учитель</option>
+            <option value="student">Ученик</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">Email <span class="required">*</span></label>
           <div class="input-with-icon">
             <Mail :size="16" class="field-icon" />
@@ -253,7 +262,7 @@ async function handleRegister() {
         </button>
 
         <p class="terms-note">
-          При регистрации для вас будет создан персональный чистый кабинет учителя.
+          Учитель создаёт классы и пробники. Ученик вступает в класс по коду и заполняет свои работы.
         </p>
       </form>
     </div>

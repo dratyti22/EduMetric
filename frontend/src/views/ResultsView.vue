@@ -5,7 +5,7 @@ import { useMockTestsStore } from '../stores/mockTests';
 import { useClassesStore } from '../stores/classes';
 import { useResultsStore } from '../stores/results';
 import { convertPrimaryToSecondary } from '../utils/scales';
-import type { MockTest, Student, MockTestResultSheet } from '../types';
+import type { MockTest, Student } from '../types';
 import {
   Save,
   ArrowLeft,
@@ -32,7 +32,11 @@ const students = computed<Student[]>(() => (test.value ? classesStore.getStudent
 const matrixScores = ref<Record<string, Record<number, number | ''>>>({});
 const saveSuccessMessage = ref(false);
 
-onMounted(() => {
+onMounted(async () => {
+  if (test.value) {
+    await classesStore.fetchStudents(test.value.classId);
+    await resultsStore.fetchResults(test.value.id);
+  }
   loadExistingResults();
 });
 
@@ -159,7 +163,7 @@ function saveResults() {
     return;
   }
 
-  const sheet: MockTestResultSheet = {
+  const sheet: import('../types').MockTestResultSheet = {
     id: 'sheet-' + test.value.id,
     mockTestId: test.value.id,
     studentScores: {},
@@ -186,11 +190,10 @@ function saveResults() {
     }
   }
 
-  resultsStore.saveSheet(sheet);
-  saveSuccessMessage.value = true;
-  setTimeout(() => {
-    saveSuccessMessage.value = false;
-  }, 3500);
+  resultsStore.saveSheet(sheet).then(() => {
+    saveSuccessMessage.value = true;
+    setTimeout(() => { saveSuccessMessage.value = false; }, 3500);
+  }).catch((error: Error) => alert(error.message));
 }
 
 // Заполнить демонстрационными данными

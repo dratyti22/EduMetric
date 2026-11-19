@@ -28,9 +28,15 @@ const selectedStudentId = ref<string>('');
 // Развернутые детали заданий по тестам
 const expandedTestIds = ref<Record<string, boolean>>({});
 
-onMounted(() => {
+onMounted(async () => {
+  if (!classesStore.loaded) await classesStore.fetchClasses();
+  if (!mockTestsStore.loaded) await mockTestsStore.fetchExams();
   if (classesStore.classes.length > 0 && classesStore.classes[0]) {
     selectedClassId.value = classesStore.classes[0].id;
+  }
+  if (selectedClassId.value) {
+    await classesStore.fetchStudents(selectedClassId.value);
+    await resultsStore.fetchDynamics(selectedClassId.value);
   }
 });
 
@@ -43,9 +49,10 @@ const classStudents = computed<Student[]>(() => {
 // При изменении класса сбрасываем / выбираем первого ученика
 watch(
   () => selectedClassId.value,
-  () => {
+  async () => {
     if (classStudents.value.length > 0 && classStudents.value[0]) {
       selectedStudentId.value = classStudents.value[0].id;
+      await resultsStore.fetchStudentHistory(selectedStudentId.value);
     } else {
       selectedStudentId.value = '';
     }

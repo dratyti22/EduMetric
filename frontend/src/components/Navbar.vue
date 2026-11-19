@@ -29,8 +29,8 @@ const navItems = [
 const currentPath = computed(() => route.path);
 
 const initials = computed(() => {
-  const last = authStore.user?.lastName?.[0] || 'E';
-  const first = authStore.user?.firstName?.[0] || 'M';
+  const last = authStore.user?.last_name?.[0] || 'E';
+  const first = authStore.user?.first_name?.[0] || 'M';
   return (last + first).toUpperCase();
 });
 
@@ -76,7 +76,7 @@ function handleLogout() {
             </div>
             <div class="user-details">
               <span class="user-name">{{ authStore.userFullName }}</span>
-              <span class="user-role">{{ authStore.user.role || 'Учитель' }}</span>
+              <span class="user-role">{{ authStore.isTeacher ? 'Учитель' : 'Ученик' }}</span>
             </div>
           </router-link>
 

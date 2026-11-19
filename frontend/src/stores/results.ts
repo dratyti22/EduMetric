@@ -1,242 +1,173 @@
-import { defineStore } from 'pinia';
-import { ref } from 'vue';
-import type { MockTestResultSheet, StudentTaskScore, ClassAnalyticsSummary, MockTest } from '../types';
-import { StorageService } from '../utils/storage';
-import { useMockTestsStore } from './mockTests';
-import { useClassesStore } from './classes';
-import { convertPrimaryToSecondary } from '../utils/scales';
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import api, { apiErrorMessage } from '../api/client'
+import type {
+  ClassAnalyticsSummary,
+  ClassDynamicsItem,
+  StudentHistoryItem,
+  StudentResult,
+  MockTestResultSheet,
+} from '../types'
 
 export const useResultsStore = defineStore('results', () => {
-  const resultSheets = ref<MockTestResultSheet[]>(StorageService.getResults());
+  const resultsByExam = ref<Record<string, StudentResult[]>>({})
+  const myResultByExam = ref<Record<string, StudentResult>>({})
+  const analyticsByExam = ref<Record<string, ClassAnalyticsSummary>>({})
+  const dynamicsByClass = ref<Record<string, ClassDynamicsItem[]>>({})
+  const historyByStudent = ref<Record<string, StudentHistoryItem[]>>({})
 
-  function syncResults() {
-    StorageService.saveResults(resultSheets.value);
-  }
-
-  function getSheetByMockTestId(mockTestId: string): MockTestResultSheet {
-    let sheet = resultSheets.value.find((r) => r.mockTestId === mockTestId);
-    if (!sheet) {
-      sheet = {
-        id: 'sheet-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-        mockTestId,
-        studentScores: {},
-        updatedAt: new Date().toISOString(),
-      };
-      resultSheets.value.push(sheet);
-      syncResults();
-    }
-    return sheet;
-  }
-
-  function saveSheet(sheet: MockTestResultSheet) {
-    sheet.updatedAt = new Date().toISOString();
-    const idx = resultSheets.value.findIndex((s) => s.mockTestId === sheet.mockTestId);
-    if (idx !== -1) {
-      resultSheets.value[idx] = { ...sheet };
-    } else {
-      resultSheets.value.push({ ...sheet });
-    }
-    syncResults();
-  }
-
-  function saveStudentScores(
-    mockTestId: string,
-    studentId: string,
-    scores: Record<number, number>,
-    subject: string,
-    maxPrimary: number
-  ): StudentTaskScore {
-    const sheet = getSheetByMockTestId(mockTestId);
-    let primary = 0;
-    for (const val of Object.values(scores)) {
-      primary += Number(val) || 0;
-    }
-    const secondary = convertPrimaryToSecondary(primary, maxPrimary, subject);
-
-    const record: StudentTaskScore = {
-      studentId,
-      scores: { ...scores },
-      primaryScore: primary,
-      secondaryScore: secondary,
-    };
-
-    sheet.studentScores[studentId] = record;
-    saveSheet(sheet);
-    return record;
-  }
-
-  function getClassAnalytics(
-    classId: string,
-    mockTestId?: string,
-    customPassingThreshold?: number
-  ): ClassAnalyticsSummary | null {
-    const classesStore = useClassesStore();
-    const testsStore = useMockTestsStore();
-
-    const students = classesStore.getStudentsByClass(classId);
-    if (students.length === 0) return null;
-
-    let targetTest: MockTest | undefined = mockTestId ? testsStore.getMockTestById(mockTestId) : undefined;
-    if (!targetTest) {
-      const classTests = testsStore.getTestsByClass(classId);
-      if (classTests.length === 0) return null;
-      targetTest = classTests[0];
-    }
-    if (!targetTest) return null;
-
-    const sheet = resultSheets.value.find((s) => s.mockTestId === targetTest.id);
-    const passingThreshold = customPassingThreshold ?? targetTest.passingScoreSecondary ?? 36;
-
-    const scoresList: StudentTaskScore[] = [];
-    for (const std of students) {
-      const scoreItem = sheet?.studentScores[std.id];
-      if (scoreItem) {
-        scoresList.push(scoreItem);
-      }
-    }
-
-    const totalStudents = students.length;
-    const attendedStudents = scoresList.length;
-
-    if (attendedStudents === 0) {
-      return {
-        totalStudents,
-        attendedStudents: 0,
-        avgPrimary: 0,
-        avgSecondary: 0,
-        maxSecondary: 0,
-        minSecondary: 0,
-        passingThreshold,
-        passedCount: 0,
-        passedPercent: 0,
-        highAchieversCount: 0,
-        highAchieversPercent: 0,
-        scoreDistribution: [
-          { range: '0–39', count: 0, percent: 0 },
-          { range: '40–59', count: 0, percent: 0 },
-          { range: '60–79', count: 0, percent: 0 },
-          { range: '80–100', count: 0, percent: 0 },
-        ],
-        taskSolvability: targetTest.tasks.map((t) => ({
-          taskNumber: t.taskNumber,
-          maxScore: t.maxScore,
-          avgScore: 0,
-          percent: 0,
-        })),
-      };
-    }
-
-    const sumPrimary = scoresList.reduce((acc, s) => acc + s.primaryScore, 0);
-    const sumSecondary = scoresList.reduce((acc, s) => acc + s.secondaryScore, 0);
-    const secondaryValues = scoresList.map((s) => s.secondaryScore);
-
-    const avgPrimary = Math.round((sumPrimary / attendedStudents) * 10) / 10;
-    const avgSecondary = Math.round((sumSecondary / attendedStudents) * 10) / 10;
-    const maxSecondary = Math.max(...secondaryValues);
-    const minSecondary = Math.min(...secondaryValues);
-
-    const passedCount = scoresList.filter((s) => s.secondaryScore >= passingThreshold).length;
-    const passedPercent = Math.round((passedCount / attendedStudents) * 100);
-
-    const highAchieversCount = scoresList.filter((s) => s.secondaryScore >= 80).length;
-    const highAchieversPercent = Math.round((highAchieversCount / attendedStudents) * 100);
-
-    // Распределение баллов
-    const distBuckets = {
-      '0–39': 0,
-      '40–59': 0,
-      '60–79': 0,
-      '80–100': 0,
-    };
-    for (const sc of scoresList) {
-      const v = sc.secondaryScore;
-      if (v < 40) distBuckets['0–39']++;
-      else if (v < 60) distBuckets['40–59']++;
-      else if (v < 80) distBuckets['60–79']++;
-      else distBuckets['80–100']++;
-    }
-
-    const scoreDistribution = Object.entries(distBuckets).map(([range, count]) => ({
-      range,
-      count,
-      percent: Math.round((count / attendedStudents) * 100),
-    }));
-
-    // Решаемость каждого задания
-    const taskSolvability = targetTest.tasks.map((task) => {
-      let sumTask = 0;
-      for (const sc of scoresList) {
-        sumTask += Number(sc.scores[task.taskNumber]) || 0;
-      }
-      const avgTask = Math.round((sumTask / attendedStudents) * 100) / 100;
-      const maxPossible = task.maxScore * attendedStudents;
-      const percent = maxPossible > 0 ? Math.round((sumTask / maxPossible) * 100) : 0;
-      return {
-        taskNumber: task.taskNumber,
-        maxScore: task.maxScore,
-        avgScore: avgTask,
-        percent,
-      };
-    });
-
+  function normalizeAnalytics(data: ClassAnalyticsSummary): ClassAnalyticsSummary {
     return {
-      totalStudents,
-      attendedStudents,
-      avgPrimary,
-      avgSecondary,
-      maxSecondary,
-      minSecondary,
-      passingThreshold,
-      passedCount,
-      passedPercent,
-      highAchieversCount,
-      highAchieversPercent,
-      scoreDistribution,
-      taskSolvability,
-    };
+      ...data,
+      totalStudents: data.total_students,
+      attendedStudents: data.attended_students,
+      avgPrimary: data.avg_primary,
+      avgSecondary: data.avg_secondary,
+      maxSecondary: data.max_secondary,
+      minSecondary: data.min_secondary,
+      passingThreshold: data.passing_threshold,
+      passedCount: data.passed_count,
+      passedPercent: data.passed_percent,
+      highAchieversCount: data.high_achievers_count,
+      highAchieversPercent: data.high_achievers_percent,
+      scoreDistribution: data.score_distribution,
+      taskSolvability: data.task_solvability.map((item) => ({
+        taskNumber: item.task_number,
+        maxScore: item.max_score,
+        avgScore: item.avg_score,
+        percent: item.percent,
+      })),
+    }
+  }
+  const resultSheets = computed<MockTestResultSheet[]>(() =>
+    Object.entries(resultsByExam.value).map(([examId, results]) => ({
+      id: `sheet-${examId}`,
+      mockTestId: examId,
+      updatedAt: new Date().toISOString(),
+      studentScores: Object.fromEntries(results.map((result) => [result.student_id, {
+        studentId: result.student_id,
+        scores: result.scores_by_number,
+        primaryScore: result.summary.primary_score,
+        secondaryScore: result.summary.secondary_score || 0,
+      }])),
+    })),
+  )
+
+  async function fetchResults(examId: string) {
+    await api.post(`/exams/${examId}/sync-students/`)
+    const { data } = await api.get<StudentResult[]>(`/exams/${examId}/results/`)
+    resultsByExam.value[examId] = data
+    return data
+  }
+
+  function getSheetByMockTestId(examId: string): MockTestResultSheet {
+    return resultSheets.value.find((sheet) => sheet.mockTestId === examId) || {
+      id: `sheet-${examId}`,
+      mockTestId: examId,
+      updatedAt: new Date().toISOString(),
+      studentScores: {},
+    }
+  }
+
+  async function saveSheet(sheet: MockTestResultSheet) {
+    for (const result of Object.values(sheet.studentScores)) {
+      const current = (resultsByExam.value[sheet.mockTestId] || []).find((item) => item.student_id === result.studentId)
+      if (current) await saveTeacherScores(current.id, sheet.mockTestId, result.scores)
+    }
+  }
+
+  async function fetchMyResult(examId: string) {
+    const { data } = await api.get<StudentResult>(`/exams/mine/${examId}/`)
+    myResultByExam.value[examId] = data
+    return data
+  }
+
+  async function saveTeacherScores(resultId: string, examId: string, scores: Record<number, number | null>) {
+    try {
+      const { data } = await api.patch<StudentResult>(`/results/${resultId}/scores/`, {
+        scores: Object.entries(scores).map(([taskNumber, score]) => ({
+          task_number: Number(taskNumber),
+          score,
+        })),
+      })
+      const list = resultsByExam.value[examId] || []
+      const index = list.findIndex((item) => item.id === resultId)
+      if (index !== -1) list[index] = data
+      else resultsByExam.value[examId] = [...list, data]
+      return data
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось сохранить баллы'))
+    }
+  }
+
+  async function saveMyScores(examId: string, scores: Record<number, number>) {
+    try {
+      const { data } = await api.patch<StudentResult>(`/exams/mine/${examId}/scores/`, {
+        scores: Object.entries(scores).map(([taskNumber, score]) => ({
+          task_number: Number(taskNumber),
+          score,
+        })),
+      })
+      myResultByExam.value[examId] = data
+      return data
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Не удалось сохранить баллы'))
+    }
+  }
+
+  async function fetchAnalytics(examId: string, threshold?: number) {
+    const { data } = await api.get<ClassAnalyticsSummary>(`/exams/${examId}/analytics/`, {
+      params: threshold !== undefined ? { threshold } : undefined,
+    })
+    const normalized = normalizeAnalytics(data)
+    analyticsByExam.value[examId] = normalized
+    return normalized
+  }
+
+  async function fetchDynamics(classId: string) {
+    const { data } = await api.get<ClassDynamicsItem[]>(`/classes/${classId}/dynamics/`)
+    dynamicsByClass.value[classId] = data
+    return data
+  }
+
+  async function fetchStudentHistory(studentId: string) {
+    const { data } = await api.get<StudentHistoryItem[]>(`/students/${studentId}/history/`)
+    const normalized = data.map((item) => ({
+      ...item,
+      testId: item.test_id,
+      primaryScore: item.primary_score,
+      secondaryScore: item.secondary_score || 0,
+      maxPrimaryScore: item.max_primary_score,
+    }))
+    historyByStudent.value[studentId] = normalized
+    return normalized
+  }
+
+  function getClassAnalytics(_classId: string, examId?: string, _threshold?: number) {
+    return analyticsByExam.value[examId || _classId] || null
   }
 
   function getStudentHistory(studentId: string) {
-    const testsStore = useMockTestsStore();
-    const history: Array<{
-      testId: string;
-      title: string;
-      date: string;
-      subject: string;
-      primaryScore: number;
-      secondaryScore: number;
-      maxPrimaryScore: number;
-      scores: Record<number, number>;
-    }> = [];
-
-    for (const sheet of resultSheets.value) {
-      const studentScore = sheet.studentScores[studentId];
-      if (studentScore) {
-        const test = testsStore.getMockTestById(sheet.mockTestId);
-        if (test) {
-          history.push({
-            testId: test.id,
-            title: test.title,
-            date: test.date,
-            subject: test.subject,
-            primaryScore: studentScore.primaryScore,
-            secondaryScore: studentScore.secondaryScore,
-            maxPrimaryScore: test.maxPrimaryScore,
-            scores: studentScore.scores,
-          });
-        }
-      }
-    }
-
-    return history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return historyByStudent.value[studentId] || []
   }
 
   return {
+    resultsByExam,
     resultSheets,
+    myResultByExam,
+    analyticsByExam,
+    dynamicsByClass,
+    historyByStudent,
+    fetchResults,
     getSheetByMockTestId,
     saveSheet,
-    saveStudentScores,
+    fetchMyResult,
+    saveTeacherScores,
+    saveMyScores,
+    fetchAnalytics,
+    fetchDynamics,
+    fetchStudentHistory,
     getClassAnalytics,
     getStudentHistory,
-  };
-});
+  }
+})

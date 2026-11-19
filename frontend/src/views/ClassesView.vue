@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useAuthStore } from '../stores/auth';
 import { useClassesStore } from '../stores/classes';
-import { AVAILABLE_SUBJECTS } from '../utils/scales';
-import type { SchoolClass, Student } from '../types';
+import { SUBJECTS, studentName, subjectName } from '../utils/subjects';
+import type { SchoolClass, Student, SubjectId } from '../types';
 import Modal from '../components/Modal.vue';
 import {
   Users,
@@ -12,10 +13,17 @@ import {
   UserPlus,
   ClipboardList,
   AlertTriangle,
-  Search
+  Search,
+  Copy,
+  Check,
 } from 'lucide-vue-next';
 
 const classesStore = useClassesStore();
+const authStore = useAuthStore();
+const pageError = ref('');
+const joinCode = ref('');
+const joinMessage = ref('');
+const copiedCode = ref('');
 
 // Поиск / фильтр
 const searchQuery = ref('');
@@ -25,18 +33,12 @@ const isClassModalOpen = ref(false);
 const isEditing = ref(false);
 const editingClassId = ref<string | null>(null);
 
-const defaultSubject = AVAILABLE_SUBJECTS[0] ?? 'Математика (профиль)';
-
 const classForm = ref<{
-  number: number;
-  letter: string;
-  subject: string;
-  description: string;
+  name: string;
+  subject: SubjectId;
 }>({
-  number: 11,
-  letter: 'А',
-  subject: defaultSubject,
-  description: '',
+  name: '11А',
+  subject: 'math_profile',
 });
 
 // Модальное окно управления учениками
@@ -53,57 +55,36 @@ const classToDelete = ref<SchoolClass | null>(null);
 function openCreateModal() {
   isEditing.value = false;
   editingClassId.value = null;
-  classForm.value = {
-    number: 11,
-    letter: 'А',
-    subject: defaultSubject,
-    description: '',
-  };
+  classForm.value = { name: '11А', subject: 'math_profile' };
   isClassModalOpen.value = true;
 }
 
 function openEditModal(cls: SchoolClass) {
   isEditing.value = true;
   editingClassId.value = cls.id;
-  classForm.value = {
-    number: cls.number,
-    letter: cls.letter,
-    subject: cls.subject,
-    description: cls.description || '',
-  };
+  classForm.value = { name: cls.name, subject: cls.subject };
   isClassModalOpen.value = true;
 }
 
-function saveClass() {
-  const letter = classForm.value.letter.trim();
-  const subject = classForm.value.subject.trim();
-
-  if (!letter) {
-    alert('Пожалуйста, укажите букву класса');
+async function saveClass() {
+  const name = classForm.value.name.trim();
+  if (!name) {
+    alert('Укажите название класса');
     return;
   }
-  if (!subject) {
-    alert('Пожалуйста, выберите предмет');
-    return;
+  try {
+    if (isEditing.value && editingClassId.value) {
+      await classesStore.updateClass(editingClassId.value, {
+        name,
+        subject: classForm.value.subject,
+      });
+    } else {
+      await classesStore.addClass({ name, subject: classForm.value.subject });
+    }
+    isClassModalOpen.value = false;
+  } catch (err: any) {
+    alert(err.message || 'Не удалось сохранить класс');
   }
-
-  if (isEditing.value && editingClassId.value) {
-    classesStore.updateClass(editingClassId.value, {
-      number: Number(classForm.value.number),
-      letter,
-      subject,
-      description: classForm.value.description,
-    });
-  } else {
-    classesStore.addClass({
-      number: Number(classForm.value.number),
-      letter,
-      subject,
-      description: classForm.value.description,
-    });
-  }
-
-  isClassModalOpen.value = false;
 }
 
 function confirmDeleteClass(cls: SchoolClass) {
@@ -111,46 +92,48 @@ function confirmDeleteClass(cls: SchoolClass) {
   isDeleteModalOpen.value = true;
 }
 
-function executeDeleteClass() {
-  if (classToDelete.value) {
-    classesStore.deleteClass(classToDelete.value.id);
-    classToDelete.value = null;
-    isDeleteModalOpen.value = false;
-  }
+async function executeDeleteClass() {
+  if (!classToDelete.value) return;
+  await classesStore.deleteClass(classToDelete.value.id);
+  classToDelete.value = null;
+  isDeleteModalOpen.value = false;
 }
 
 // Управление учениками
-function openRosterModal(cls: SchoolClass) {
+async function openRosterModal(cls: SchoolClass) {
   activeClass.value = cls;
   singleStudentName.value = '';
   batchStudentsText.value = '';
   showBatchInput.value = false;
   isRosterModalOpen.value = true;
+  await classesStore.fetchStudents(cls.id);
 }
 
-function handleAddSingleStudent() {
-  if (!activeClass.value) return;
-  if (!singleStudentName.value.trim()) return;
+async function handleAddSingleStudent() {
+  if (!activeClass.value || !singleStudentName.value.trim()) return;
   try {
-    classesStore.addStudent(activeClass.value.id, singleStudentName.value);
+    await classesStore.addStudent(activeClass.value.id, singleStudentName.value);
     singleStudentName.value = '';
   } catch (err: any) {
     alert(err.message);
   }
 }
 
-function handleBatchAddStudents() {
-  if (!activeClass.value) return;
-  if (!batchStudentsText.value.trim()) return;
-  const count = classesStore.addStudentsBatch(activeClass.value.id, batchStudentsText.value);
-  batchStudentsText.value = '';
-  showBatchInput.value = false;
-  alert(`Успешно добавлено ${count} учеников!`);
+async function handleBatchAddStudents() {
+  if (!activeClass.value || !batchStudentsText.value.trim()) return;
+  try {
+    const count = await classesStore.addStudentsBatch(activeClass.value.id, batchStudentsText.value);
+    batchStudentsText.value = '';
+    showBatchInput.value = false;
+    alert(`Добавлено учеников: ${count}`);
+  } catch (err: any) {
+    alert(err.message);
+  }
 }
 
-function handleRemoveStudent(studentId: string) {
+async function handleRemoveStudent(studentId: string) {
   if (confirm('Удалить ученика из класса?')) {
-    classesStore.removeStudent(studentId);
+    await classesStore.removeStudent(studentId);
   }
 }
 
@@ -158,29 +141,96 @@ function getStudents(classId: string): Student[] {
   return classesStore.getStudentsByClass(classId);
 }
 
-const filteredClasses = () => {
+const filteredClasses = computed(() => {
   const query = searchQuery.value.toLowerCase().trim();
   if (!query) return classesStore.classes;
   return classesStore.classes.filter(
-    (c) =>
-      `${c.number}${c.letter}`.toLowerCase().includes(query) ||
-      c.subject.toLowerCase().includes(query) ||
-      (c.description && c.description.toLowerCase().includes(query))
+    (item) =>
+      item.name.toLowerCase().includes(query) ||
+      subjectName(item.subject).toLowerCase().includes(query) ||
+      (item.join_code || '').toLowerCase().includes(query),
   );
-};
+});
+
+async function copyCode(code: string) {
+  await navigator.clipboard.writeText(code);
+  copiedCode.value = code;
+  setTimeout(() => {
+    copiedCode.value = '';
+  }, 1500);
+}
+
+async function handleJoin() {
+  joinMessage.value = '';
+  pageError.value = '';
+  try {
+    const result = await classesStore.joinByCode(joinCode.value);
+    joinCode.value = '';
+    if (result.status === 'pending') {
+      joinMessage.value = 'ФИО совпало с карточкой класса. Ждём подтверждения учителя.';
+    } else if (result.status === 'already_member') {
+      joinMessage.value = 'Вы уже состоите в этом классе.';
+    } else {
+      joinMessage.value = `Вы вступили в класс «${result.school_class.name}».`;
+    }
+  } catch (err: any) {
+    pageError.value = err.message;
+  }
+}
+
+async function approveRequest(id: string) {
+  await classesStore.approveJoinRequest(id);
+  if (activeClass.value) await classesStore.fetchStudents(activeClass.value.id);
+  await classesStore.fetchClasses();
+}
+
+onMounted(async () => {
+  if (authStore.isTeacher) {
+    await classesStore.fetchClasses();
+    await classesStore.fetchJoinRequests();
+  } else {
+    await classesStore.fetchMyClasses();
+  }
+});
 </script>
 
 <template>
   <div class="classes-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Управление классами</h1>
-        <p class="page-subtitle">Создание учебных групп, выбор предмета и ведение состава учеников</p>
+        <h1 class="page-title">{{ authStore.isTeacher ? 'Управление классами' : 'Мои классы' }}</h1>
+        <p class="page-subtitle">
+          {{ authStore.isTeacher ? 'Создайте класс и передайте ученикам код вступления' : 'Вступите в класс по коду от учителя' }}
+        </p>
       </div>
-      <button class="btn btn-primary" @click="openCreateModal">
+      <button v-if="authStore.isTeacher" class="btn btn-primary" @click="openCreateModal">
         <Plus :size="18" />
         <span>Создать класс</span>
       </button>
+    </div>
+
+    <div v-if="!authStore.isTeacher" class="card" style="margin-bottom: 1rem;">
+      <form class="form-row" style="align-items: flex-end;" @submit.prevent="handleJoin">
+        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+          <label class="form-label">Код класса</label>
+          <input v-model="joinCode" class="form-input" placeholder="EX-7K4p9M2A" required />
+        </div>
+        <button class="btn btn-primary" type="submit">Вступить</button>
+      </form>
+      <p v-if="joinMessage" style="margin-top: 0.75rem;">{{ joinMessage }}</p>
+      <p v-if="pageError" class="text-danger" style="margin-top: 0.75rem;">{{ pageError }}</p>
+    </div>
+
+    <div v-if="authStore.isTeacher && classesStore.joinRequests.length" class="card" style="margin-bottom: 1rem;">
+      <h3>Запросы на привязку</h3>
+      <div v-for="request in classesStore.joinRequests" :key="request.id" class="form-row" style="align-items: center; margin-top: 0.75rem;">
+        <div style="flex: 1;">
+          <strong>{{ request.user_name }}</strong> хочет привязаться к карточке
+          «{{ request.matched_student_name }}» в классе {{ request.class_name }}
+        </div>
+        <button class="btn btn-primary btn-sm" @click="approveRequest(request.id)">Подтвердить</button>
+        <button class="btn btn-secondary btn-sm" @click="classesStore.rejectJoinRequest(request.id)">Отклонить</button>
+      </div>
     </div>
 
     <!-- Панель поиска и сводка -->
@@ -200,7 +250,7 @@ const filteredClasses = () => {
     </div>
 
     <!-- Сетка классов -->
-    <div v-if="filteredClasses().length === 0" class="empty-placeholder card">
+    <div v-if="filteredClasses.length === 0" class="empty-placeholder card">
       <Users :size="48" class="empty-icon" />
       <h3>Классы не найдены</h3>
       <p>Создайте новый класс или измените параметры поиска</p>
@@ -210,30 +260,33 @@ const filteredClasses = () => {
     </div>
 
     <div v-else class="grid-cards">
-      <div v-for="cls in filteredClasses()" :key="cls.id" class="card card-hover class-card">
+      <div v-for="cls in filteredClasses" :key="cls.id" class="card card-hover class-card">
         <div class="class-card-top">
-          <div class="class-badge-num">
-            {{ cls.number }} «{{ cls.letter }}»
-          </div>
-          <span class="badge badge-primary">{{ cls.subject }}</span>
+          <div class="class-badge-num">{{ cls.name }}</div>
+          <span class="badge badge-primary">{{ subjectName(cls.subject) }}</span>
         </div>
 
-        <p v-if="cls.description" class="class-desc">{{ cls.description }}</p>
-        <p v-else class="class-desc text-muted">Описание не указано</p>
+        <p v-if="authStore.isTeacher && cls.join_code" class="class-desc">
+          Код: <strong>{{ cls.join_code }}</strong>
+          <button class="btn btn-secondary btn-icon btn-sm" type="button" @click="copyCode(cls.join_code)">
+            <Check v-if="copiedCode === cls.join_code" :size="14" />
+            <Copy v-else :size="14" />
+          </button>
+        </p>
 
         <div class="class-stats-box">
           <div class="students-count-badge">
             <Users :size="16" />
-            <span><strong>{{ getStudents(cls.id).length }}</strong> учеников в классе</span>
+            <span><strong>{{ cls.students_count ?? getStudents(cls.id).length }}</strong> учеников</span>
           </div>
         </div>
 
         <div class="class-card-actions">
-          <button class="btn btn-secondary btn-sm" @click="openRosterModal(cls)">
+          <button v-if="authStore.isTeacher" class="btn btn-secondary btn-sm" @click="openRosterModal(cls)">
             <UserPlus :size="16" />
             <span>Ученики</span>
           </button>
-          <div class="actions-group-right">
+          <div v-if="authStore.isTeacher" class="actions-group-right">
             <button class="btn btn-secondary btn-icon" @click="openEditModal(cls)" title="Редактировать класс">
               <Edit2 :size="16" />
             </button>
@@ -252,43 +305,15 @@ const filteredClasses = () => {
       @close="isClassModalOpen = false"
     >
       <form @submit.prevent="saveClass">
-        <div class="form-row">
-          <div class="form-group" style="flex: 1;">
-            <label class="form-label">Номер класса</label>
-            <select v-model.number="classForm.number" class="form-select">
-              <option v-for="n in [5, 6, 7, 8, 9, 10, 11]" :key="n" :value="n">{{ n }} класс</option>
-            </select>
-          </div>
-          <div class="form-group" style="flex: 1;">
-            <label class="form-label">Буква класса</label>
-            <input
-              v-model="classForm.letter"
-              type="text"
-              maxlength="2"
-              class="form-input"
-              placeholder="А, Б, В..."
-              required
-            />
-          </div>
-        </div>
-
         <div class="form-group">
-          <label class="form-label">Предмет подготовки</label>
+          <label class="form-label">Название класса</label>
+          <input v-model="classForm.name" class="form-input" placeholder="11А" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Предмет</label>
           <select v-model="classForm.subject" class="form-select">
-            <option v-for="sub in AVAILABLE_SUBJECTS" :key="sub" :value="sub">
-              {{ sub }}
-            </option>
+            <option v-for="item in SUBJECTS" :key="item.id" :value="item.id">{{ item.name }}</option>
           </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Примечание / Профиль (необязательно)</label>
-          <textarea
-            v-model="classForm.description"
-            class="form-textarea"
-            rows="2"
-            placeholder="Например: Профильная группа углубленной подготовки к ЕГЭ"
-          ></textarea>
         </div>
       </form>
 
@@ -303,7 +328,7 @@ const filteredClasses = () => {
     <!-- Модальное окно управления учениками -->
     <Modal
       :isOpen="isRosterModalOpen"
-      :title="activeClass ? `Список учеников: ${activeClass.number} «${activeClass.letter}» (${activeClass.subject})` : 'Список учеников'"
+      :title="activeClass ? `Список учеников: ${activeClass.name}` : 'Список учеников'"
       maxWidth="680px"
       @close="isRosterModalOpen = false"
     >
@@ -375,7 +400,10 @@ const filteredClasses = () => {
               <tbody>
                 <tr v-for="(student, idx) in getStudents(activeClass.id)" :key="student.id">
                   <td>{{ idx + 1 }}</td>
-                  <td style="font-weight: 500;">{{ student.fullName }}</td>
+                  <td style="font-weight: 500;">
+                    {{ studentName(student) }}
+                    <span v-if="student.is_linked" class="badge badge-primary">аккаунт</span>
+                  </td>
                   <td style="text-align: right;">
                     <button
                       class="btn btn-danger btn-icon btn-sm"
