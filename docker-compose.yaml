@@ -20,7 +20,9 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      target: development
     container_name: edumetric-backend
     restart: unless-stopped
     env_file:

@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS development
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,3 +26,10 @@ COPY . .
 EXPOSE 8000
 
 CMD ["sh", "entrypoint.sh"]
+
+FROM development AS production
+RUN useradd --create-home app \
+    && mkdir -p /app/staticfiles \
+    && chown app:app /app/staticfiles
+USER app
+CMD ["gunicorn", "backend.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]

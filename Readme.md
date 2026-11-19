@@ -176,3 +176,7 @@ npm run build
    python3 manage.py runserver
    ```
    Сервер API будет доступен по адресу `http://localhost:8000/`.
+# Развёртывание на сервере
+
+Production-конфигурация с HTTPS, Gunicorn и PostgreSQL: [DEPLOY.md](DEPLOY.md).
+Для неё используется отдельный `compose.production.yaml`; dev-конфигурация не меняется.

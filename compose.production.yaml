@@ -1,0 +1,85 @@
+name: edumetric-production
+
+x-backend: &backend
+  build:
+    context: ./backend
+    target: production
+  env_file: ${PRODUCTION_ENV_FILE:-.env.production}
+  environment:
+    DEBUG: "0"
+    DB_ENGINE: django.db.backends.postgresql
+    DB_HOST: db
+    DB_PORT: "5432"
+    TRUST_PROXY_HEADERS: "1"
+    SECURE_SSL_REDIRECT: "1"
+  volumes:
+    - static_data:/app/staticfiles
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  release:
+    <<: *backend
+    restart: "no"
+    command: ["sh", "-c", "python manage.py check --deploy && python manage.py migrate --noinput && python manage.py collectstatic --noinput"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    restart: unless-stopped
+    depends_on:
+      release:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - static_data:/srv/static:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+  static_data:
+  caddy_data:
+  caddy_config:
